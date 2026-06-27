@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef, useCallback, type CSSProperties, type ReactNode } from "react";
 import { supabase } from '@/lib/supabase'
-import { initOneSignal, notifyZonaCritica } from '@/lib/onesignal'
 
 type ToastType = "ok" | "warn" | "green" | string
 type SectionProps = { online: boolean; onToast: (msg: string, type?: ToastType) => void }
@@ -120,21 +119,30 @@ const URGENCIAS = [
 
 const REMOTE_ESPECIALIDADES = ["Psicólogo/a", "Abogado/a", "Médico/a"];
 
-async function guardarEnSupabase(
+async function publicarReporte(
   table: SupabaseTable,
   item: BaseRecord,
+  online: boolean,
   onToast: SectionProps['onToast'],
-  mode: 'insert' | 'upsert' = 'insert'
+  options: { mode?: 'insert' | 'upsert'; okMsg?: string } = {}
 ): Promise<boolean> {
+  const { mode = 'insert', okMsg = 'Publicado correctamente' } = options
   const row = { id: item.id, record: item }
-  const request = mode === 'upsert'
-    ? supabase.from(table).upsert(row)
-    : supabase.from(table).insert(row)
-  const { error } = await request.select().single()
-
-  if (error) {
-    console.error('Supabase error:', error.message, error.code)
-    await IDB.put(table, item)
+  try {
+    if (online) {
+      const req = mode === 'upsert'
+        ? supabase.from(table).upsert(row)
+        : supabase.from(table).insert(row)
+      const { error } = await req
+      if (error) throw error
+      await IDB.put(table, { ...item, _off: false })
+      onToast(okMsg, 'ok')
+      return true
+    }
+    throw new Error('offline')
+  } catch (e: unknown) {
+    console.error('publicarReporte error:', e)
+    await IDB.put(table, { ...item, _off: true })
     addQ({
       table,
       action: mode === 'upsert' ? 'update' : 'insert',
@@ -142,18 +150,9 @@ async function guardarEnSupabase(
       id: mode === 'upsert' ? item.id : undefined,
       patch: mode === 'upsert' ? item : undefined,
     })
-    const msg = error.code === '42501'
-      ? 'Sin permiso en Supabase — revisa las políticas RLS'
-      : navigator.onLine
-        ? `No se pudo publicar: ${error.message}`
-        : 'Guardado sin conexión'
-    onToast(msg, 'warn')
+    onToast(online ? 'Error al publicar — guardado localmente' : 'Sin conexión — guardado localmente', 'warn')
     return false
   }
-
-  await IDB.put(table, { ...item, _off: false })
-  onToast('Publicado correctamente', 'ok')
-  return true
 }
 
 // ============================================================
@@ -290,8 +289,26 @@ function PersonasSection({ online, onToast }: SectionProps) {
 
   const save = async () => {
     if (!f.nombre || !f.contacto) { onToast("Nombre y contacto son obligatorios","warn"); return; }
-    const item = { ...f, foto, estado:"buscando", id:uid(), ts:now(), _off:true };
-    await guardarEnSupabase("personas", item, onToast);
+    const item: BaseRecord = {
+      id: uid(),
+      ts: now(),
+      nombre: f.nombre,
+      edad: f.edad,
+      cat: f.cat,
+      hospital: f.hospital,
+      sala: f.sala,
+      ubicacion: f.ubicacion,
+      pais: f.pais,
+      descripcion: f.descripcion,
+      contactoNombre: f.contactoNombre,
+      contacto: f.contacto,
+      lat: f.lat ?? null,
+      lng: f.lng ?? null,
+      foto: foto ?? null,
+      estado: "buscando",
+      created_at: new Date().toISOString(),
+    }
+    await publicarReporte("personas", item, online, onToast, { okMsg: "Persona publicada correctamente" })
     await reload(); setView("list"); setFoto(null);
     setF({ nombre:"",edad:"",cat:"nino_sano",hospital:"",sala:"",ubicacion:"",pais:"Venezuela",descripcion:"",contactoNombre:"",contacto:"",lat:null as number | null,lng:null as number | null });
   };
@@ -610,16 +627,57 @@ function ZonasSection({ online, onToast }: SectionProps) {
 
   const tog = (field: "insumos" | "ayuda" | "personal", val: string) => setF(x => ({ ...x, [field]: x[field].includes(val) ? x[field].filter((v: string) => v !== val) : [...x[field], val] }));
 
-  const save = async () => {
-    if (!f.nombre || !f.contacto) { onToast("Nombre de zona y contacto obligatorios", "warn"); return; }
-    const item = { ...f, estado_zona: "activa", id: uid(), ts: now(), _off: true };
-    const ok = await guardarEnSupabase("zonas", item, onToast);
-    await reload();
-    if (ok && f.urgencia === 'critica') {
-      await notifyZonaCritica(f.nombre, f.estado)
+  const saveZona = async () => {
+    if (!f.nombre || !f.contacto) { onToast('Nombre y contacto son obligatorios', 'warn'); return; }
+    const item: BaseRecord = {
+      id: uid(),
+      ts: now(),
+      nombre: f.nombre,
+      estado: f.estado,
+      estado_vzla: f.estado,
+      pais: f.pais,
+      descripcion: f.descripcion,
+      lat: f.lat ?? null,
+      lng: f.lng ?? null,
+      insumos: [...(f.insumos || [])],
+      ayuda: [...(f.ayuda || [])],
+      personal: [...(f.personal || [])],
+      contactoNombre: f.contactoNombre,
+      contacto_nombre: f.contactoNombre,
+      contacto: f.contacto,
+      urgencia: f.urgencia,
+      estado_zona: 'activa',
+      created_at: new Date().toISOString(),
     }
-    setView("list");
-    setF({ nombre:"",estado:"",pais:"Venezuela",descripcion:"",lat:null as number | null,lng:null as number | null,insumos:[] as string[],ayuda:[] as string[],personal:[] as string[],contactoNombre:"",contacto:"",urgencia:"critica" });
+    try {
+      if (online) {
+        const { error } = await supabase.from('zonas').insert({ id: item.id, record: item })
+        if (error) throw error
+        await IDB.put('zonas', { ...item, _off: false })
+        onToast('Zona publicada correctamente', 'ok')
+        if (f.urgencia === 'critica') {
+          await fetch('/api/notify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title: 'Zona Crítica Reportada',
+              message: `${f.nombre} en ${f.estado}, ${f.pais} necesita ayuda urgente`,
+              url: 'https://reconstruyendovzla.com',
+            }),
+          })
+        }
+      } else {
+        throw new Error('offline')
+      }
+    } catch (e: unknown) {
+      console.error('saveZona error:', e)
+      await IDB.put('zonas', { ...item, _off: true })
+      addQ({ table: 'zonas', action: 'insert', data: item })
+      onToast(online ? 'Error al publicar — guardado localmente' : 'Sin conexión — guardado localmente', 'warn')
+    }
+    await reload()
+    setView('list')
+    setF({ nombre:'', estado:'', pais:'Venezuela', descripcion:'', lat:null, lng:null, insumos:[], ayuda:[], personal:[], contactoNombre:'', contacto:'', urgencia:'critica' })
   };
 
   const handleAsistir = (data: Asistente) => {
@@ -723,7 +781,7 @@ function ZonasSection({ online, onToast }: SectionProps) {
         <Field label="Personal que se solicita"><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{PERSONAL.map((i: string) => <Chip key={i} label={i} active={f.personal.includes(i)} onClick={() => tog("personal", i)} />)}</div></Field>
         <Field label="Coordinador de zona"><Input value={f.contactoNombre} onChange={v => setF(x => ({ ...x, contactoNombre: v }))} placeholder="Nombre de quien coordina" /></Field>
         <Field label="Contacto *"><Input value={f.contacto} onChange={v => setF(x => ({ ...x, contacto: v }))} placeholder="+58 414-000-0000 / @usuario" /></Field>
-        <Btn onClick={save} full>{online ? "Publicar Zona de Crisis" : "Guardar sin internet"}</Btn>
+        <Btn onClick={saveZona} full>{online ? "Publicar Zona de Crisis" : "Guardar sin internet"}</Btn>
       </Card>
     </div>
   );
@@ -812,8 +870,23 @@ function MascotasSection({ online, onToast }: SectionProps) {
 
   const save = async () => {
     if (!f.ubicacion||!f.contacto) { onToast("Ubicación y contacto obligatorios","warn"); return; }
-    const item = { ...f, foto, id:uid(), ts:now(), _off:true };
-    await guardarEnSupabase("mascotas", item, onToast);
+    const item: BaseRecord = {
+      id: uid(),
+      ts: now(),
+      especie: f.especie,
+      nombre: f.nombre,
+      color: f.color,
+      cat: f.cat,
+      heridas: f.heridas,
+      ubicacion: f.ubicacion,
+      contacto: f.contacto,
+      contactoNombre: f.contactoNombre,
+      lat: f.lat ?? null,
+      lng: f.lng ?? null,
+      foto: foto ?? null,
+      created_at: new Date().toISOString(),
+    }
+    await publicarReporte("mascotas", item, online, onToast, { okMsg: "Mascota publicada correctamente" })
     await reload(); setView("list"); setFoto(null);
     setF({ especie:"Perro",nombre:"",color:"",cat:"sana",heridas:"",ubicacion:"",contacto:"",contactoNombre:"",lat:null as number | null,lng:null as number | null });
   };
@@ -903,8 +976,23 @@ function VoluntariosSection({ online, onToast }: SectionProps) {
 
   const save = async () => {
     if (!f.nombre||!f.contacto||!f.especialidades.length) { onToast("Nombre, especialidad y contacto obligatorios","warn"); return; }
-    const item = { ...f, pais:"Venezuela", remoto: puedeRemoto ? f.remoto : false, idiomas:f.idiomas.split(",").map(s=>s.trim()), estado:"disponible", id:uid(), ts:now(), _off:true };
-    await guardarEnSupabase("voluntarios", item, onToast);
+    const item: BaseRecord = {
+      id: uid(),
+      ts: now(),
+      nombre: f.nombre,
+      contacto: f.contacto,
+      especialidades: [...f.especialidades],
+      pais: "Venezuela",
+      ciudad: f.ciudad,
+      remoto: puedeRemoto ? f.remoto : false,
+      idiomas: f.idiomas.split(",").map(s => s.trim()),
+      bio: f.bio,
+      lat: f.lat ?? null,
+      lng: f.lng ?? null,
+      estado: "disponible",
+      created_at: new Date().toISOString(),
+    }
+    await publicarReporte("voluntarios", item, online, onToast, { okMsg: "Registrado como voluntario" })
     await reload(); setView("list");
     setF({ nombre:"",especialidades:[] as string[],pais:"Venezuela",ciudad:"",remoto:false,idiomas:"Español",bio:"",contacto:"",lat:null as number | null,lng:null as number | null });
   };
@@ -1132,8 +1220,19 @@ function DonacionesSection({ online, onToast }: SectionProps) {
 
   const saveDon = async () => {
     if (!fd.monto || !fd.nombre) { onToast("Monto y nombre son obligatorios", "warn"); return; }
-    const item = { ...fd, comprobante: comp, verificado: false, id: uid(), ts: now(), _off: true };
-    await guardarEnSupabase("donaciones", item, onToast);
+    const item: BaseRecord = {
+      id: uid(),
+      ts: now(),
+      monto: fd.monto,
+      moneda: fd.moneda,
+      metodo: fd.metodo,
+      nombre: fd.nombre,
+      mensaje: fd.mensaje,
+      comprobante: comp ?? null,
+      verificado: false,
+      created_at: new Date().toISOString(),
+    }
+    await publicarReporte("donaciones", item, online, onToast, { okMsg: "¡Gracias! Tu donación fue registrada y se verificará pronto." })
     await reload(); setView("main"); setComp(null);
     setFd({ monto:"", moneda:"USD", metodo:"Zelle", nombre:"", mensaje:"" });
   };
@@ -1432,11 +1531,27 @@ function RefugiosSection({ online, onToast }: SectionProps) {
   // Guardar refugio
   const saveRefugio = async () => {
     if (!fr.nombre || !fr.contacto) { onToast("Nombre del refugio y contacto son obligatorios","warn"); return; }
-    const item = {
-      ...fr, foto, personas:[], id:uid(), ts:now(), _off:true,
-      estado:"activo",
-    };
-    await guardarEnSupabase("refugios", item, onToast);
+    const item: BaseRecord = {
+      id: uid(),
+      ts: now(),
+      nombre: fr.nombre,
+      direccion: fr.direccion,
+      municipio: fr.municipio,
+      estado: fr.estado,
+      pais: fr.pais,
+      capacidad: fr.capacidad,
+      descripcion: fr.descripcion,
+      lat: fr.lat ?? null,
+      lng: fr.lng ?? null,
+      necesidades: [...(fr.necesidades || [])],
+      contactoNombre: fr.contactoNombre,
+      contacto: fr.contacto,
+      foto: foto ?? null,
+      personas: [],
+      estado_refugio: "activo",
+      created_at: new Date().toISOString(),
+    }
+    await publicarReporte("refugios", item, online, onToast, { okMsg: "Refugio publicado correctamente" })
     await reload(); setView("list"); setFoto(null);
     setFr({ nombre:"",direccion:"",municipio:"",estado:"",pais:"Venezuela",capacidad:"",descripcion:"",lat:null as number | null,lng:null as number | null,necesidades:[] as string[],contactoNombre:"",contacto:"" });
   };
@@ -1447,8 +1562,11 @@ function RefugiosSection({ online, onToast }: SectionProps) {
     const refugio = refugios.find(r => r.id === sel!.id);
     if (!refugio) return;
     const persona = { ...fp, foto:fotoPer, id:uid(), ts:now() };
-    const updated = { ...refugio, personas:[...(refugio.personas||[]), persona] };
-    await guardarEnSupabase("refugios", updated, onToast, 'upsert');
+    const updated: BaseRecord = {
+      ...refugio,
+      personas: [...(refugio.personas || []), persona],
+    }
+    await publicarReporte("refugios", updated, online, onToast, { mode: 'upsert', okMsg: "Persona registrada en el refugio" })
     await reload();
     setSel(updated);
     setView("detalle"); setFotoPer(null);
@@ -1581,7 +1699,7 @@ function RefugiosSection({ online, onToast }: SectionProps) {
         <Card style={{marginBottom:12}}>
           {sel.foto && <img src={sel.foto} alt="" style={{width:"100%",maxHeight:180,objectFit:"cover",borderRadius:10,marginBottom:12}} />}
           <div style={{display:"flex",gap:6,marginBottom:8,flexWrap:"wrap"}}>
-            <Pill label={sel.estado==="activo"?"Activo":"Cerrado"} color={sel.estado==="activo"?C.primary:C.muted} bg={sel.estado==="activo"?C.primaryLt:"#F1F5F9"} />
+            <Pill label={(sel.estado_refugio ?? sel.estado)==="activo"?"Activo":"Cerrado"} color={(sel.estado_refugio ?? sel.estado)==="activo"?C.primary:C.muted} bg={(sel.estado_refugio ?? sel.estado)==="activo"?C.primaryLt:"#F1F5F9"} />
             {sel._off&&<Pill label="Pendiente sync" color={C.muted} bg="#F1F5F9" />}
           </div>
           <h2 style={{margin:"0 0 4px",fontSize:19,fontWeight:800}}>{sel.nombre}</h2>
@@ -1777,7 +1895,30 @@ export default function CrisisVE() {
   const [pending, setPending] = useState(0);
   const [toast, setToast] = useState<ToastState>(null);
 
-  useEffect(() => { initOneSignal() }, []);
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      import('react-onesignal').then((mod) => {
+        mod.default.init({
+          appId: process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID!,
+          allowLocalhostAsSecureOrigin: true,
+          notifyButton: { enable: false },
+          promptOptions: {
+            slidedown: {
+              prompts: [{
+                type: 'push',
+                autoPrompt: true,
+                text: {
+                  actionMessage: 'Recibe alertas de zonas críticas en Venezuela',
+                  acceptButton: 'Activar',
+                  cancelButton: 'Ahora no',
+                },
+              }],
+            },
+          },
+        } as unknown as Parameters<typeof mod.default.init>[0])
+      }).catch((e) => console.error('OneSignal init error:', e))
+    }
+  }, []);
 
   useEffect(()=>{
     setPending(getQ().length);

@@ -5,6 +5,7 @@ import { getClientIp, sanitizeNotifyText, sanitizeNotifyUrl } from '@/lib/api-se
 export async function POST(req: NextRequest) {
   try {
     if (!process.env.ONESIGNAL_REST_API_KEY || !process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID) {
+      console.error('Notify: faltan ONESIGNAL_REST_API_KEY o NEXT_PUBLIC_ONESIGNAL_APP_ID')
       return NextResponse.json({ error: 'Servicio no disponible' }, { status: 503 })
     }
 
@@ -36,19 +37,23 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({
         app_id: process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID,
         included_segments: ['All'],
-        headings: { en: title },
-        contents: { en: message },
+        headings: { en: title, es: title },
+        contents: { en: message, es: message },
         url,
       }),
     })
 
+    const result = await response.json().catch(() => ({})) as { errors?: string[]; id?: string }
+
     if (!response.ok) {
-      console.error('OneSignal error:', response.status)
-      return NextResponse.json({ error: 'No se pudo enviar la notificación' }, { status: 502 })
+      console.error('OneSignal error:', response.status, result)
+      const detail = result.errors?.[0] || 'No se pudo enviar la notificación'
+      return NextResponse.json({ error: detail }, { status: 502 })
     }
 
-    return NextResponse.json({ success: true })
-  } catch {
+    return NextResponse.json({ success: true, id: result.id })
+  } catch (e) {
+    console.error('Notify internal error:', e)
     return NextResponse.json({ error: 'Error interno del servidor' }, { status: 500 })
   }
 }
