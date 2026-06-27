@@ -1291,6 +1291,14 @@ function DonacionesSection({ online, onToast }: SectionProps) {
 
   return (
     <div>
+      <a
+        href="https://gofund.me/c3937cbbc"
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{ display: 'block', background: '#02A95C', color: 'white', textAlign: 'center', padding: '14px', borderRadius: 12, fontWeight: 800, fontSize: 16, textDecoration: 'none', marginBottom: 16 }}
+      >
+        Donar en GoFundMe
+      </a>
       {/* HERO */}
       <div style={{background:'linear-gradient(135deg, #1D4ED8 0%, #0EA5E9 100%)', borderRadius:16, padding:24, marginBottom:14, color:'white', position:'relative', overflow:'hidden'}}>
         <div style={{position:'absolute', top:12, right:12, display:'flex', alignItems:'center', gap:6, background:'rgba(255,255,255,0.15)', borderRadius:20, padding:'4px 10px'}}>
@@ -1864,18 +1872,17 @@ export default function CrisisVE() {
     <div style={{fontFamily:"'Segoe UI',system-ui,-apple-system,sans-serif",background:C.bg,minHeight:"100vh",color:C.txt,maxWidth:680,margin:"0 auto",position:"relative"}}>
 
       {/* HEADER */}
-      <div style={{background:`linear-gradient(135deg, ${C.primary} 0%, ${C.sky} 100%)`,color:"white",padding:"13px 16px 11px",position:"sticky",top:0,zIndex:100,boxShadow:"0 2px 12px rgba(37,99,235,0.3)"}}>
+      <div style={{background:"white",borderBottom:"1px solid #E2E8F0",color:"#0F172A",padding:"13px 16px 11px",position:"sticky",top:0,zIndex:100}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
           <div>
             <div style={{display:'flex', alignItems:'center', gap:8}}>
-              <img src="/Reconstruyendo.svg" alt="Logo" width={36} height={36} style={{borderRadius:6}} />
-              <span>Reconstruyendo Venezuela</span>
+              <img src="/Reconstruyendo.svg" alt="Reconstruyendo Venezuela" height={40} width={155} style={{objectFit:'contain'}} />
             </div>
-            <div style={{fontSize:10,opacity:.85,marginTop:1}}>Coordinación de Emergencias · Venezuela</div>
+            <div style={{fontSize:10,color:"#0F172A",opacity:.75,marginTop:1}}>Coordinación de Emergencias · Venezuela</div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:5,fontSize:10,fontWeight:700}}>
             <div style={{width:7,height:7,borderRadius:"50%",background:online?C.green:C.amber,flexShrink:0}} />
-            <span style={{color:"rgba(255,255,255,0.9)"}}>{online?"En línea":"Sin conexión"}{pending>0?` · ${pending} pendientes`:""}</span>
+            <span style={{color:"#0F172A"}}>{online?"En línea":"Sin conexión"}{pending>0?` · ${pending} pendientes`:""}</span>
           </div>
         </div>
       </div>
