@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, type CSSProperties, type ReactNode } from "react";
 import { supabase } from '@/lib/supabase'
+import { initOneSignal, notifyZonaCritica } from '@/lib/onesignal'
 
 // Reserved for cloud sync — import required by app architecture
 void supabase
@@ -594,7 +595,11 @@ function ZonasSection({ online, onToast }: SectionProps) {
     const item = { ...f, estado_zona: "activa", id: uid(), ts: now(), _off: !online };
     await IDB.put("zonas", item);
     if (!online) addQ({ table: "zonas", action: "insert", data: item });
-    await reload(); setView("list");
+    await reload();
+    if (f.urgencia === 'critica') {
+      await notifyZonaCritica(f.nombre, f.estado)
+    }
+    setView("list");
     setF({ nombre:"",estado:"",pais:"Venezuela",descripcion:"",lat:null as number | null,lng:null as number | null,insumos:[] as string[],ayuda:[] as string[],personal:[] as string[],contactoNombre:"",contacto:"",urgencia:"critica" });
     onToast(online ? "Zona de crisis publicada" : "Guardada sin internet", online ? "ok" : "warn");
   };
@@ -1267,19 +1272,24 @@ function DonacionesSection({ online, onToast }: SectionProps) {
   return (
     <div>
       {/* HERO */}
-      <div style={{ background:`linear-gradient(135deg, ${C.primary} 0%, ${C.sky} 100%)`, borderRadius:16, padding:20, marginBottom:14, color:"white", textAlign:"center" }}>
-        <div style={{ fontSize:11, fontWeight:700, opacity:.85, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.5px" }}>Total recaudado para las víctimas</div>
-        <div style={{ fontSize:40, fontWeight:900, letterSpacing:"-1px", lineHeight:1 }}>
-          ${totalUSD.toLocaleString("es-VE",{minimumFractionDigits:2,maximumFractionDigits:2})} <span style={{ fontSize:20 }}>USD</span>
+      <div style={{background:'linear-gradient(135deg, #1D4ED8 0%, #0EA5E9 100%)', borderRadius:16, padding:24, marginBottom:14, color:'white', position:'relative', overflow:'hidden'}}>
+        <div style={{position:'absolute', top:12, right:12, display:'flex', alignItems:'center', gap:6, background:'rgba(255,255,255,0.15)', borderRadius:20, padding:'4px 10px'}}>
+          <div style={{width:8, height:8, borderRadius:'50%', background:'#4ADE80'}} />
+          <span style={{fontSize:11, fontWeight:700}}>EN VIVO</span>
         </div>
-        {totalBS > 0 && <div style={{ fontSize:16, fontWeight:700, opacity:.85, marginTop:4 }}>{totalBS.toLocaleString("es-VE")} Bs</div>}
-        <div style={{ fontSize:13, fontWeight:600, opacity:.9, marginTop:10, lineHeight:1.5, maxWidth:420, marginLeft:"auto", marginRight:"auto" }}>
-          Cada dólar recaudado va destinado a la reconstrucción de hogares para familias damnificadas
+        <div style={{fontSize:11, fontWeight:700, opacity:.85, marginBottom:4, textTransform:'uppercase', letterSpacing:'0.5px'}}>Total recaudado para las víctimas</div>
+        <div style={{fontSize:40, fontWeight:900, letterSpacing:'-1px', lineHeight:1}}>
+          ${totalUSD.toLocaleString('es-VE',{minimumFractionDigits:2, maximumFractionDigits:2})} <span style={{fontSize:20}}>USD</span>
         </div>
-        <div style={{ fontSize:11, opacity:.7, marginTop:6 }}>{dons.filter((d: BaseRecord)=>d.verificado).length} donaciones verificadas · {pendientes} pendientes · {campanas.length} campañas activas</div>
-        <div style={{ display:"flex", gap:8, marginTop:14 }}>
-          <button onClick={() => setView("donar")} style={{ flex:1, background:"white", color:C.primary, border:"none", borderRadius:9, padding:"10px", fontWeight:800, fontSize:13, cursor:"pointer" }}>Ya doné — registrar</button>
-          <button onClick={() => setView("campana")} style={{ flex:1, background:"rgba(255,255,255,0.2)", color:"white", border:"2px solid rgba(255,255,255,0.5)", borderRadius:9, padding:"10px", fontWeight:800, fontSize:13, cursor:"pointer" }}>Crear campaña</button>
+        {totalBS > 0 && <div style={{fontSize:16, fontWeight:700, opacity:.85, marginTop:4}}>{totalBS.toLocaleString('es-VE')} Bs</div>}
+        <div style={{margin:'12px 0 6px', background:'rgba(255,255,255,0.2)', borderRadius:20, height:6}}>
+          <div style={{background:'#4ADE80', width:`${Math.min((totalUSD/10000)*100, 100)}%`, height:'100%', borderRadius:20, transition:'width 1s'}} />
+        </div>
+        <div style={{fontSize:11, opacity:.8}}>{dons.filter((d: BaseRecord)=>d.verificado).length} donantes · Meta: $10,000 USD</div>
+        <div style={{fontSize:11, opacity:.7, marginTop:4}}>Cada dólar va destinado a reconstruir hogares para familias damnificadas</div>
+        <div style={{display:'flex', gap:8, marginTop:14}}>
+          <button onClick={()=>setView('donar')} style={{flex:1, background:'white', color:'#1D4ED8', border:'none', borderRadius:9, padding:'10px', fontWeight:800, fontSize:13, cursor:'pointer'}}>Ya doné — registrar</button>
+          <button onClick={()=>setView('campana')} style={{flex:1, background:'rgba(255,255,255,0.2)', color:'white', border:'2px solid rgba(255,255,255,0.5)', borderRadius:9, padding:'10px', fontWeight:800, fontSize:13, cursor:'pointer'}}>Crear campaña</button>
         </div>
       </div>
 
@@ -1815,6 +1825,8 @@ export default function CrisisVE() {
   const [pending, setPending] = useState(0);
   const [toast, setToast] = useState<ToastState>(null);
 
+  useEffect(() => { initOneSignal() }, []);
+
   useEffect(()=>{
     setPending(getQ().length);
     const up=()=>{ setOnline(true); const q=getQ(); if(q.length){ setToast({msg:`Conexión restaurada — sincronizando ${q.length} reporte(s)…`,type:"ok"}); setTimeout(()=>{ clearQ(); setPending(0); },2500); } };
@@ -1835,7 +1847,7 @@ export default function CrisisVE() {
           <div>
             <div style={{display:'flex', alignItems:'center', gap:8}}>
               <img src="/Reconstruyendo.svg" alt="Logo" width={36} height={36} style={{borderRadius:6}} />
-              <span style={{fontWeight:900,fontSize:17,letterSpacing:'-0.4px'}}>Reconstruyendo Venezuela</span>
+              <span>Reconstruyendo Venezuela</span>
             </div>
             <div style={{fontSize:10,opacity:.85,marginTop:1}}>Coordinación de Emergencias · Venezuela</div>
           </div>
@@ -1867,8 +1879,12 @@ export default function CrisisVE() {
         {tab==="donaciones"  && <DonacionesSection  online={online} onToast={onToast} />}
       </div>
 
-      <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:680,background:"white",borderTop:`1px solid ${C.border}`,padding:"8px 16px",textAlign:"center",fontSize:10,color:C.muted,zIndex:80}}>
-        Información humanitaria · Funciona sin internet · #ReconstruyendoVenezuelaJuntos
+      <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:680,background:"white",borderTop:`1px solid ${C.border}`,padding:"8px 16px",zIndex:80}}>
+        <div style={{textAlign:'center', fontSize:10, color:C.muted}}>
+          Información humanitaria · Funciona sin internet · #ReconstruyendoVenezuelaJuntos
+          <br/>
+          reconstruyendovzla26@gmail.com
+        </div>
       </div>
 
       {toast && <Toast msg={toast.msg} type={toast.type} onClose={()=>setToast(null)} />}
