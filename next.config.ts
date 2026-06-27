@@ -7,7 +7,15 @@ const nextConfig: NextConfig = {
         source: '/sw.js',
         headers: [
           { key: 'Service-Worker-Allowed', value: '/' },
-          { key: 'Cache-Control', value: 'no-cache' },
+          { key: 'Cache-Control', value: 'no-cache, no-store, must-revalidate' },
+        ],
+      },
+      {
+        source: '/push/onesignal/:path*',
+        headers: [
+          { key: 'Service-Worker-Allowed', value: '/push/onesignal/' },
+          { key: 'Cache-Control', value: 'no-cache, no-store, must-revalidate' },
+          { key: 'Content-Type', value: 'application/javascript; charset=utf-8' },
         ],
       },
       {

@@ -16,17 +16,17 @@ import {
   notificacionZonaCritica,
   sincronizarTodo,
 } from '@/lib/offline-sync'
+import {
+  activarNotificacionesPush,
+  estaSuscritoPush,
+  initOneSignalSDK,
+  needsIOSInstallStep,
+} from '@/lib/onesignal-client'
 
 type ToastType = "ok" | "warn" | "green" | string
 type SectionProps = { online: boolean; onToast: (msg: string, type?: ToastType) => void; dataVersion: number }
 type Asistente = { nombre: string; contacto?: string; especialidad?: string; ts: string }
 type ToastState = { msg: string; type: ToastType } | null
-
-declare global {
-  interface Window {
-    OneSignalDeferred?: Array<(OneSignal: { init: (opts: Record<string, unknown>) => Promise<void> }) => void | Promise<void>>
-  }
-}
 
 const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
 const now = () => new Date().toISOString();
@@ -149,6 +149,71 @@ function PhotoUpload({preview,onFile,label="Subir foto"}:{preview:string|null;on
       <span style={{fontSize:11,color:C.muted,cursor:"pointer"}} onClick={()=>ref.current?.click()}>{preview?"Cambiar foto":label}</span>
     </div>
   );
+}
+
+function NotificacionesBanner({ onToast }: { onToast: (msg: string, type?: ToastType) => void }) {
+  const [estado, setEstado] = useState<'loading' | 'ios-install' | 'off' | 'on'>('loading')
+  const [activando, setActivando] = useState(false)
+
+  useEffect(() => {
+    if (needsIOSInstallStep()) {
+      setEstado('ios-install')
+      return
+    }
+    estaSuscritoPush()
+      .then((sub) => setEstado(sub ? 'on' : 'off'))
+      .catch(() => setEstado('off'))
+  }, [])
+
+  const activar = async () => {
+    setActivando(true)
+    try {
+      const r = await activarNotificacionesPush()
+      if (r === 'ok') {
+        setEstado('on')
+        onToast('Alertas EN VIVO activadas — recibirás zonas críticas al instante', 'ok')
+      } else if (r === 'ios-install') {
+        setEstado('ios-install')
+        onToast('En iPhone: Compartir → Añadir a pantalla de inicio, luego activa alertas', 'warn')
+      } else if (r === 'denied') {
+        onToast('Permiso denegado. Actívalo en Ajustes → Notificaciones', 'warn')
+      } else {
+        onToast('Tu navegador no soporta alertas push', 'warn')
+      }
+    } finally {
+      setActivando(false)
+    }
+  }
+
+  if (estado === 'loading' || estado === 'on') return null
+
+  return (
+    <div style={{
+      background: estado === 'ios-install' ? C.skyLt : C.primaryLt,
+      borderBottom: `1px solid ${estado === 'ios-install' ? C.sky : C.primaryMd}`,
+      padding: '10px 14px',
+      fontSize: 12,
+    }}>
+      {estado === 'ios-install' ? (
+        <div>
+          <div style={{ fontWeight: 800, color: C.txt, marginBottom: 4 }}>iPhone / iPad: instala la app primero</div>
+          <div style={{ color: C.muted, lineHeight: 1.5 }}>
+            Safari → Compartir → <strong>Añadir a pantalla de inicio</strong>. Luego abre la app e activa alertas.
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'space-between', flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 180 }}>
+            <div style={{ fontWeight: 800, color: C.primaryDk }}>Alertas de zonas críticas EN VIVO</div>
+            <div style={{ color: C.muted, marginTop: 2 }}>Android, Chrome y iOS (app instalada)</div>
+          </div>
+          <Btn onClick={activar} small disabled={activando} color={C.primary}>
+            {activando ? 'Activando…' : 'Activar alertas'}
+          </Btn>
+        </div>
+      )}
+    </div>
+  )
 }
 
 function OfflineBanner({pending, syncing}:{pending:number; syncing?:boolean}){
@@ -1892,16 +1957,7 @@ export default function CrisisVE() {
   }, [onToast]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return
-    window.OneSignalDeferred = window.OneSignalDeferred || []
-    window.OneSignalDeferred.push(async function (OneSignal) {
-      await OneSignal.init({
-        appId: process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID,
-        allowLocalhostAsSecureOrigin: true,
-        serviceWorkerParam: { scope: '/' },
-        serviceWorkerPath: 'sw.js',
-      })
-    })
+    initOneSignalSDK()
   }, []);
 
   useEffect(() => {
@@ -1945,6 +2001,7 @@ export default function CrisisVE() {
         </div>
       </div>
 
+      <NotificacionesBanner onToast={onToast} />
       <OfflineBanner pending={pending} syncing={syncing} />
 
       {/* TABS */}

@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { notifyRatelimit, checkRateLimit } from '@/lib/ratelimit'
 import { getClientIp, sanitizeNotifyText, sanitizeNotifyUrl } from '@/lib/api-security'
 
+const SITE = 'https://reconstruyendovzla.com'
+const ICON = `${SITE}/icon-192.png`
+
 export async function POST(req: NextRequest) {
   try {
     if (!process.env.ONESIGNAL_REST_API_KEY || !process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID) {
@@ -28,22 +31,36 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Título y mensaje son obligatorios' }, { status: 400 })
     }
 
+    const payload = {
+      app_id: process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID,
+      target_channel: 'push',
+      included_segments: ['Subscribed Users'],
+      headings: { en: title, es: title },
+      contents: { en: message, es: message },
+      url,
+      web_url: url,
+      chrome_web_icon: ICON,
+      firefox_icon: ICON,
+      chrome_web_badge: ICON,
+      priority: 10,
+      ttl: 3600,
+      android_channel_id: process.env.ONESIGNAL_ANDROID_CHANNEL_ID || undefined,
+    }
+
     const response = await fetch('https://onesignal.com/api/v1/notifications', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Basic ${process.env.ONESIGNAL_REST_API_KEY}`,
       },
-      body: JSON.stringify({
-        app_id: process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID,
-        included_segments: ['All'],
-        headings: { en: title, es: title },
-        contents: { en: message, es: message },
-        url,
-      }),
+      body: JSON.stringify(payload),
     })
 
-    const result = await response.json().catch(() => ({})) as { errors?: string[]; id?: string }
+    const result = await response.json().catch(() => ({})) as {
+      errors?: string[]
+      id?: string
+      recipients?: number
+    }
 
     if (!response.ok) {
       console.error('OneSignal error:', response.status, result)
@@ -51,7 +68,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: detail }, { status: 502 })
     }
 
-    return NextResponse.json({ success: true, id: result.id })
+    if (result.recipients === 0) {
+      console.warn('OneSignal: 0 destinatarios — ningún suscriptor web activo')
+    }
+
+    return NextResponse.json({
+      success: true,
+      id: result.id,
+      recipients: result.recipients ?? null,
+    })
   } catch (e) {
     console.error('Notify internal error:', e)
     return NextResponse.json({ error: 'Error interno del servidor' }, { status: 500 })

@@ -1,6 +1,4 @@
-importScripts('https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.sw.js');
-
-const CACHE = 'rvzla-v5';
+const CACHE = 'rvzla-v6';
 const STATIC = [
   '/',
   '/manifest.json',
@@ -9,6 +7,14 @@ const STATIC = [
   '/favicon.ico',
   '/Reconstruyendo.svg',
   '/apple-icon.png',
+];
+
+const SKIP_CACHE_HOSTS = [
+  'onesignal.com',
+  'googleapis.com',
+  'gstatic.com',
+  'firebaseio.com',
+  'firebase.googleapis.com',
 ];
 
 self.addEventListener('install', (e) => {
@@ -27,6 +33,8 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
+
+  if (SKIP_CACHE_HOSTS.some((h) => url.hostname.includes(h))) return;
 
   if (e.request.mode === 'navigate') {
     e.respondWith(
@@ -58,7 +66,7 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  if (url.origin === self.location.origin) {
+  if (url.origin === self.location.origin && !url.pathname.startsWith('/push/')) {
     e.respondWith(
       caches.match(e.request).then((cached) => {
         const network = fetch(e.request)
@@ -73,6 +81,5 @@ self.addEventListener('fetch', (e) => {
         return cached || network;
       })
     );
-    return;
   }
 });
