@@ -7,6 +7,7 @@ export type StoreName =
   | 'refugios'
   | 'aliados'
   | 'voluntarios_rec'
+  | 'alertas_mesh'
 
 export type SupabaseTable = Exclude<StoreName, 'voluntarios_rec'>
 
@@ -33,10 +34,10 @@ export const IDB = {
   async open(): Promise<IDBDatabase> {
     if (this.db) return this.db
     return new Promise((res, rej) => {
-      const req = indexedDB.open('crisisve_v3', 3)
+      const req = indexedDB.open('crisisve_v3', 4)
       req.onupgradeneeded = (e) => {
         const db = (e.target as IDBOpenDBRequest).result
-        ;(['personas', 'mascotas', 'zonas', 'voluntarios', 'donaciones', 'refugios', 'aliados', 'voluntarios_rec'] as StoreName[]).forEach((s) => {
+        ;(['personas', 'mascotas', 'zonas', 'voluntarios', 'donaciones', 'refugios', 'aliados', 'voluntarios_rec', 'alertas_mesh'] as StoreName[]).forEach((s) => {
           if (!db.objectStoreNames.contains(s)) db.createObjectStore(s, { keyPath: 'id' })
         })
       }

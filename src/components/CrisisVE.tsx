@@ -16,6 +16,7 @@ import {
   notificacionZonaCritica,
   sincronizarTodo,
 } from '@/lib/offline-sync'
+import { hayInternetReal } from '@/lib/network'
 import {
   iniciarOneSignalCuandoListo,
   needsIOSInstallStep,
@@ -23,6 +24,10 @@ import {
   permisoNativoConcedido,
   vigilarPermisoNotificaciones,
 } from '@/lib/onesignal-client'
+import { RedRescate } from '@/components/RedRescate'
+import { CompartirSinInternet } from '@/components/CompartirSinInternet'
+import { compressImage } from '@/lib/compress-image'
+import { decodificarRegistro, avisarLocal } from '@/lib/red-rescate'
 
 type ToastType = "ok" | "warn" | "green" | string
 type SectionProps = { online: boolean; onToast: (msg: string, type?: ToastType) => void; dataVersion: number }
@@ -43,6 +48,7 @@ const C = {
   teal: "#0D9488", tealLt: "#F0FDFA",
   green: "#059669", greenLt: "#ECFDF5",
   amber: "#D97706", amberLt: "#FEF3C7",
+  red: "#DC2626", redLt: "#FEF2F2",
   purple: "#7C3AED", purpleLt: "#F5F3FF",
   bg: "#F0F4F8", card: "#FFFFFF",
   txt: "#0F172A", muted: "#64748B", border: "#E2E8F0",
@@ -83,16 +89,28 @@ const REMOTE_ESPECIALIDADES = ["Psicólogo/a", "Abogado/a", "Médico/a"];
 async function publicarReporte(
   table: SupabaseTable,
   item: BaseRecord,
-  online: boolean,
+  _online: boolean,
   onToast: SectionProps['onToast'],
-  options: { mode?: 'insert' | 'upsert'; okMsg?: string } = {}
+  options: { mode?: 'insert' | 'upsert'; okMsg?: string; offlineMsg?: string } = {}
 ): Promise<boolean> {
-  const { mode = 'insert', okMsg = 'Publicado correctamente' } = options
+  const {
+    mode = 'insert',
+    okMsg = 'Publicado correctamente',
+    offlineMsg = '✓ Guardado en TU teléfono. Aparece en la lista. Se sube a la red cuando haya internet.',
+  } = options
   const row = { id: item.id, record: item }
 
-  await IDB.put(table, { ...item, _off: true })
+  try {
+    await IDB.put(table, { ...item, _off: true })
+  } catch (e) {
+    console.error('IDB.put error:', e)
+    onToast('No se pudo guardar. Quita la foto o libera espacio en el teléfono.', 'warn')
+    return false
+  }
 
-  if (!online || !navigator.onLine) {
+  const redReal = await hayInternetReal()
+
+  if (!redReal) {
     addQ({
       table,
       action: mode === 'upsert' ? 'update' : 'insert',
@@ -100,7 +118,7 @@ async function publicarReporte(
       id: mode === 'upsert' ? item.id : undefined,
       patch: mode === 'upsert' ? item : undefined,
     })
-    onToast('Guardado ✓ Se publicará al reconectar', 'ok')
+    onToast(offlineMsg, 'ok')
     return true
   }
 
@@ -111,7 +129,7 @@ async function publicarReporte(
     const result = await Promise.race([
       req,
       new Promise<{ error: { message: string } }>((resolve) =>
-        setTimeout(() => resolve({ error: { message: 'timeout' } }), 12000)
+        setTimeout(() => resolve({ error: { message: 'timeout' } }), 8000)
       ),
     ])
     if (result.error) throw result.error
@@ -127,7 +145,7 @@ async function publicarReporte(
       id: mode === 'upsert' ? item.id : undefined,
       patch: mode === 'upsert' ? item : undefined,
     })
-    onToast('Guardado ✓ Se sincronizará en breve', 'ok')
+    onToast(offlineMsg, 'ok')
     return true
   }
 }
@@ -239,7 +257,15 @@ function NotificacionesBanner({ onToast }: { onToast: (msg: string, type?: Toast
   )
 }
 
-function OfflineBanner({pending, syncing}:{pending:number; syncing?:boolean}){
+function OfflineBanner({pending, syncing, online}:{pending:number; syncing?:boolean; online?:boolean}){
+  if (online === false) {
+    return (
+      <div style={{background:"#FEF2F2",borderBottom:"2px solid #DC2626",padding:"10px 14px",fontSize:12,fontWeight:700,color:"#DC2626",textAlign:"center",lineHeight:1.45}}>
+        SIN INTERNET — Ve a Crisis → comparte alertas por SMS, QR o Bluetooth entre rescatistas
+        {pending > 0 ? ` · ${pending} pendiente(s) de subir` : ""}
+      </div>
+    );
+  }
   if (!pending && !syncing) return null;
   return (
     <div style={{background:C.amberLt,borderBottom:`1px solid ${C.amber}`,padding:"8px 14px",fontSize:12,fontWeight:600,color:C.amber,textAlign:"center"}}>
@@ -251,54 +277,85 @@ function OfflineBanner({pending, syncing}:{pending:number; syncing?:boolean}){
 // ============================================================
 // GPS
 // ============================================================
-function GPSButton({ lat, lng, onLocation }: { lat: number | null; lng: number | null; onLocation: (la: number, ln: number) => void }) {
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(false)
+function solicitarUbicacionGPS(): Promise<{ lat: number; lng: number } | null> {
+  return new Promise((resolve) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      resolve(null)
+      return
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 }
+    )
+  })
+}
 
-  const getLocation = () => {
+function GPSButton({
+  lat,
+  lng,
+  onLocation,
+  auto = false,
+  autoLabel = 'Pinneando ubicación de este teléfono…',
+}: {
+  lat: number | null
+  lng: number | null
+  onLocation: (la: number, ln: number) => void
+  auto?: boolean
+  autoLabel?: string
+}) {
+  const [loading, setLoading] = useState(auto && lat == null)
+  const [error, setError] = useState(false)
+  const pinned = useRef(false)
+
+  const getLocation = useCallback(() => {
     setLoading(true)
     setError(false)
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        onLocation(pos.coords.latitude, pos.coords.longitude)
-        setLoading(false)
-      },
-      () => {
+    solicitarUbicacionGPS().then((loc) => {
+      if (loc) {
+        onLocation(loc.lat, loc.lng)
+        pinned.current = true
+        setError(false)
+      } else {
         setError(true)
-        setLoading(false)
-      },
-      { enableHighAccuracy: true, timeout: 10000 }
-    )
-  }
+      }
+      setLoading(false)
+    })
+  }, [onLocation])
+
+  useEffect(() => {
+    if (auto && lat == null && !pinned.current) getLocation()
+  }, [auto, lat, getLocation])
 
   return (
     <div>
       <button
+        type="button"
         onClick={getLocation}
         disabled={loading}
         style={{
           width: '100%',
           padding: '12px',
           borderRadius: 9,
-          border: `1.5px solid ${C.border}`,
+          border: `1.5px solid ${lat ? C.green : C.border}`,
           background: lat ? C.greenLt : 'white',
           color: lat ? C.green : C.muted,
           fontWeight: 700,
           fontSize: 14,
           cursor: loading ? 'wait' : 'pointer',
-          fontFamily: 'inherit'
+          fontFamily: 'inherit',
         }}
       >
-        {loading ? 'Obteniendo ubicación...' : lat ? 'Ubicación obtenida' : 'Usar mi ubicación GPS'}
+        {loading ? autoLabel : lat ? '📍 Ubicación fijada (este teléfono)' : 'Reintentar GPS'}
       </button>
       {lat != null && lng != null && (
         <p style={{ fontSize: 11, color: C.green, marginTop: 4, fontWeight: 600 }}>
-          Coordenadas: {lat.toFixed(5)}, {lng.toFixed(5)}
+          Coordenadas del reporte: {lat.toFixed(5)}, {lng.toFixed(5)}
         </p>
       )}
       {error && (
-        <p style={{ fontSize: 11, color: C.amber, marginTop: 4 }}>
-          No se pudo obtener la ubicación. Verifica los permisos de GPS.
+        <p style={{ fontSize: 11, color: C.amber, marginTop: 4, lineHeight: 1.45 }}>
+          No se pudo obtener GPS. Activa ubicación para este sitio en ajustes del teléfono y toca Reintentar.
         </p>
       )}
     </div>
@@ -334,35 +391,93 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
   const [q, setQ] = useState("");
   const [catF, setCatF] = useState("todos");
   const [estF, setEstF] = useState("todos");
+  const [saving, setSaving] = useState(false);
+  const [compartir, setCompartir] = useState<BaseRecord | null>(null);
+  const [codigoImport, setCodigoImport] = useState('');
   const [f, setF] = useState({ nombre:"",edad:"",cat:"nino_sano",hospital:"",sala:"",ubicacion:"",pais:"Venezuela",descripcion:"",contactoNombre:"",contacto:"",lat:null as number | null,lng:null as number | null });
 
   const reload = useCallback(async () => setItems(await IDB.getAll("personas")), []);
   useEffect(() => { reload(); }, [reload, dataVersion]);
 
+  const abrirFormulario = () => {
+    setF({ nombre:"",edad:"",cat:"nino_sano",hospital:"",sala:"",ubicacion:"",pais:"Venezuela",descripcion:"",contactoNombre:"",contacto:"",lat:null,lng:null });
+    setFoto(null);
+    setView("form");
+  };
+
+  useEffect(() => {
+    if (view !== "form") return;
+    let cancelled = false;
+    solicitarUbicacionGPS().then((loc) => {
+      if (cancelled || !loc) return;
+      setF((x) => (x.lat != null ? x : { ...x, lat: loc.lat, lng: loc.lng }));
+    });
+    return () => { cancelled = true; };
+  }, [view]);
+
   const save = async () => {
-    if (!f.nombre || !f.contacto) { onToast("Nombre y contacto son obligatorios","warn"); return; }
-    const item: BaseRecord = {
-      id: uid(),
-      ts: now(),
-      nombre: f.nombre,
-      edad: f.edad,
-      cat: f.cat,
-      hospital: f.hospital,
-      sala: f.sala,
-      ubicacion: f.ubicacion,
-      pais: f.pais,
-      descripcion: f.descripcion,
-      contactoNombre: f.contactoNombre,
-      contacto: f.contacto,
-      lat: f.lat ?? null,
-      lng: f.lng ?? null,
-      foto: foto ?? null,
-      estado: "buscando",
-      created_at: new Date().toISOString(),
+    if (saving) return;
+    if (!f.contactoNombre.trim() || !f.contacto.trim()) {
+      onToast("Tu nombre y contacto son obligatorios — los coordinadores deben poder localizarte", "warn");
+      return;
     }
-    await publicarReporte("personas", item, online, onToast, { okMsg: "Persona publicada correctamente" })
-    await reload(); setView("list"); setFoto(null);
-    setF({ nombre:"",edad:"",cat:"nino_sano",hospital:"",sala:"",ubicacion:"",pais:"Venezuela",descripcion:"",contactoNombre:"",contacto:"",lat:null as number | null,lng:null as number | null });
+    const nombre = f.nombre.trim() || (f.edad ? `Persona ${f.edad}` : "");
+    if (!nombre) {
+      onToast('Describe a la persona (nombre o edad, ej: "Niño/a ~7 años")', "warn");
+      return;
+    }
+
+    let lat = f.lat;
+    let lng = f.lng;
+    if (lat == null || lng == null) {
+      const loc = await solicitarUbicacionGPS();
+      if (!loc) {
+        onToast("Activa el GPS del teléfono — la ubicación del reporte es obligatoria", "warn");
+        return;
+      }
+      lat = loc.lat;
+      lng = loc.lng;
+      setF((x) => ({ ...x, lat, lng }));
+    }
+
+    setSaving(true);
+    try {
+      const fotoFinal = foto ? await compressImage(foto) : null;
+      const item: BaseRecord = {
+        id: uid(),
+        ts: now(),
+        nombre,
+        edad: f.edad,
+        cat: f.cat,
+        hospital: f.hospital,
+        sala: f.sala,
+        ubicacion: f.ubicacion,
+        pais: f.pais,
+        descripcion: f.descripcion,
+        contactoNombre: f.contactoNombre.trim(),
+        contacto_nombre: f.contactoNombre.trim(),
+        contacto: f.contacto.trim(),
+        reporta_nombre: f.contactoNombre.trim(),
+        reporta_contacto: f.contacto.trim(),
+        lat,
+        lng,
+        foto: fotoFinal,
+        estado: "buscando",
+        created_at: new Date().toISOString(),
+      }
+      const ok = await publicarReporte("personas", item, online, onToast, {
+        okMsg: "Persona publicada — visible para coordinadores",
+        offlineMsg: "✓ Niño/persona GUARDADO en tu teléfono. Compártelo por SMS o QR ahora.",
+      });
+      if (!ok) return;
+      await reload();
+      setView("list");
+      setFoto(null);
+      setCompartir(item);
+      setF({ nombre:"",edad:"",cat:"nino_sano",hospital:"",sala:"",ubicacion:"",pais:"Venezuela",descripcion:"",contactoNombre:"",contacto:"",lat:null as number | null,lng:null as number | null });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const markFound = async (id: string) => {
@@ -397,6 +512,7 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
           {sel.descripcion && <div style={{background:C.bg,borderRadius:10,padding:12,margin:"12px 0",fontSize:13,lineHeight:1.6}}>{sel.descripcion}</div>}
           {sel.lat && sel.lng && <GPSCoordsLink lat={sel.lat} lng={sel.lng} />}
           <div style={{borderTop:`1px solid ${C.border}`,paddingTop:14,marginTop:6}}>
+            <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",marginBottom:6}}>Reportado por</div>
             {sel.contactoNombre && <p style={{margin:"0 0 2px",fontWeight:700,fontSize:14}}>{sel.contactoNombre}</p>}
             <p style={{margin:"0 0 14px",fontSize:15,fontWeight:800,color:C.primary}}>{sel.contacto}</p>
           </div>
@@ -404,7 +520,15 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
             ? <Btn onClick={()=>markFound(sel.id)} color={C.green} full> Marcar como ENCONTRADO/A</Btn>
             : <div style={{textAlign:"center",padding:14,background:C.greenLt,borderRadius:10,fontWeight:700,color:C.green}}>¡Ya fue encontrado/a!</div>
           }
+          <div style={{ marginTop: 14 }}>
+            <Btn outline color={C.red} full onClick={() => setCompartir(sel)}>
+              📤 Compartir sin internet (SMS / QR)
+            </Btn>
+          </div>
         </Card>
+        {compartir && (
+          <CompartirSinInternet item={compartir} onClose={() => setCompartir(null)} onToast={onToast} />
+        )}
       </div>
     );
   }
@@ -417,7 +541,35 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
         <Back onClick={()=>setView("list")} />
         <Card>
           <h3 style={{margin:"0 0 4px",fontWeight:800}}>Reportar Persona</h3>
-          <p style={{margin:"0 0 14px",fontSize:12,color:C.muted}}>{online?"Los datos se publican al instante":"Sin internet — se guardará y publicará automáticamente cuando vuelva la conexión"}</p>
+          <p style={{margin:"0 0 14px",fontSize:12,color:C.muted,lineHeight:1.5}}>
+            {online
+              ? "El GPS se fija solo desde este teléfono. Los coordinadores usan tu contacto para ir al lugar."
+              : "Sin internet: se guarda aquí y se sube cuando haya red. El GPS se toma automáticamente de este teléfono."}
+          </p>
+
+          <Field label="Ubicación del reporte (GPS automático) *">
+            <GPSButton
+              auto
+              lat={f.lat}
+              lng={f.lng}
+              onLocation={(la, ln) => setF((x) => ({ ...x, lat: la, lng: ln }))}
+              autoLabel="Obteniendo ubicación de este teléfono…"
+            />
+          </Field>
+
+          <div style={{background:C.primaryLt,border:`2px solid ${C.primary}`,borderRadius:12,padding:"12px 14px",marginBottom:14}}>
+            <div style={{fontSize:12,fontWeight:900,color:C.primary,marginBottom:10}}>Tus datos — quien reporta *</div>
+            <Field label="Tu nombre *">
+              <Input value={f.contactoNombre} onChange={v=>setF(x=>({...x,contactoNombre:v}))} placeholder="Ej: Carlos Martínez, Bomberos La Guaira" />
+            </Field>
+            <Field label="Tu teléfono o WhatsApp *">
+              <Input value={f.contacto} onChange={v=>setF(x=>({...x,contacto:v}))} placeholder="+58 414-000-0000" />
+            </Field>
+          </div>
+
+          <div style={{background:C.amberLt,border:`1px solid ${C.amber}`,borderRadius:10,padding:"10px 12px",marginBottom:14,fontSize:12,lineHeight:1.5,color:C.amber,fontWeight:600}}>
+            ¿Encontraste a un niño solo? Pon edad + foto. El GPS ya marca dónde estás con esa persona.
+          </div>
           <PhotoUpload preview={foto} onFile={setFoto} label="Foto de la persona" />
           <Field label="Categoría">
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
@@ -426,22 +578,20 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
               ))}
             </div>
           </Field>
-          <Field label="Nombre completo *"><Input value={f.nombre} onChange={v=>setF(x=>({...x,nombre:v}))} placeholder="Ej: María González" /></Field>
+          <Field label="Nombre completo"><Input value={f.nombre} onChange={v=>setF(x=>({...x,nombre:v}))} placeholder='Ej: María / o "Niño sin identificar"' /></Field>
           <Field label="Edad aproximada"><Input value={f.edad} onChange={v=>setF(x=>({...x,edad:v}))} placeholder="Ej: 7 años / ~35 años" /></Field>
           {isHosp && <>
             <Field label="Hospital *"><Input value={f.hospital} onChange={v=>setF(x=>({...x,hospital:v}))} placeholder="Ej: Hospital Pérez Carreño" /></Field>
             <Field label="Sala / Piso"><Input value={f.sala} onChange={v=>setF(x=>({...x,sala:v}))} placeholder="Ej: Emergencias, Piso 2" /></Field>
           </>}
-          <Field label="Última ubicación (texto)"><Input value={f.ubicacion} onChange={v=>setF(x=>({...x,ubicacion:v}))} placeholder="Ej: Petare, Caracas" /></Field>
+          <Field label="Última ubicación (texto, opcional)"><Input value={f.ubicacion} onChange={v=>setF(x=>({...x,ubicacion:v}))} placeholder="Ej: Sector Las Flores, La Guaira" /></Field>
           <Field label="País"><Input value={f.pais} onChange={v=>setF(x=>({...x,pais:v}))} placeholder="Venezuela" /></Field>
-          <Field label="Ubicación GPS">
-            <GPSButton lat={f.lat} lng={f.lng} onLocation={(la, ln) => setF(x => ({ ...x, lat: la, lng: ln }))} />
-          </Field>
           <Field label="Descripción (ropa, señas, situación)"><Textarea value={f.descripcion} onChange={v=>setF(x=>({...x,descripcion:v}))} placeholder="Camisa azul, cabello corto…" /></Field>
-          <Field label="Tu nombre (quien reporta)"><Input value={f.contactoNombre} onChange={v=>setF(x=>({...x,contactoNombre:v}))} placeholder="Ej: Carlos Martínez" /></Field>
-          <Field label="Contacto (WhatsApp / @usuario) *"><Input value={f.contacto} onChange={v=>setF(x=>({...x,contacto:v}))} placeholder="+58 414-000-0000 / @usuario" /></Field>
-          <Btn onClick={save} full>{online?"Publicar Reporte":"Guardar sin internet"}</Btn>
+          <Btn onClick={save} full disabled={saving}>{saving?"Guardando…":online?"Publicar Reporte":"GUARDAR EN MI TELÉFONO"}</Btn>
         </Card>
+        {compartir && (
+          <CompartirSinInternet item={compartir} onClose={() => setCompartir(null)} onToast={onToast} />
+        )}
       </div>
     );
   }
@@ -449,8 +599,40 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
   // LIST
   const buscando=items.filter((p: BaseRecord)=>p.estado!=="encontrado").length;
   const enc=items.filter((p: BaseRecord)=>p.estado==="encontrado").length;
+
+  const importarPersona = async () => {
+    const decoded = decodificarRegistro(codigoImport.trim())
+    if (!decoded || decoded.table !== 'personas') {
+      onToast('Código inválido o no es una persona', 'warn')
+      return
+    }
+    const { item } = decoded
+    const existente = await IDB.get('personas', item.id)
+    if (!existente) await IDB.put('personas', { ...item, _off: true, _mesh: true })
+    avisarLocal('👤 Persona recibida', String(item.nombre))
+    onToast(`Persona importada: ${item.nombre}`, 'ok')
+    setCodigoImport('')
+    await reload()
+  }
+
   return (
     <div>
+      {!online && (
+        <div style={{background:C.redLt,border:`1px solid ${C.red}`,borderRadius:12,padding:12,marginBottom:12,fontSize:12,lineHeight:1.5}}>
+          <strong style={{color:C.red}}>Sin internet:</strong> lo que guardes queda en este teléfono y se sube solo cuando haya red.
+          Comparte por SMS/QR al coordinador más cercano.
+        </div>
+      )}
+      <div style={{background:'white',borderRadius:12,padding:12,marginBottom:14,border:`1px solid ${C.border}`}}>
+        <div style={{fontSize:12,fontWeight:800,color:C.muted,marginBottom:8}}>¿Otro rescatista te envió un código?</div>
+        <input
+          value={codigoImport}
+          onChange={e => setCodigoImport(e.target.value)}
+          placeholder="Pega código RVZ1:…"
+          style={{width:'100%',padding:'10px 12px',borderRadius:8,border:`1.5px solid ${C.border}`,fontSize:12,boxSizing:'border-box',marginBottom:8,fontFamily:'monospace'}}
+        />
+        <Btn small onClick={importarPersona} color={C.green}>Importar persona</Btn>
+      </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
         <StatBox n={buscando} label="Buscando familia" color={C.amber} />
         <StatBox n={enc} label="Personas reunidas" color={C.green} />
@@ -459,7 +641,7 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
       </div>
       <div style={{display:"flex",gap:8,marginBottom:10}}>
         <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Nombre, lugar, hospital…" style={{flex:1,padding:"10px 12px",borderRadius:8,border:`1.5px solid ${C.border}`,fontSize:13,outline:"none"}} />
-        <Btn onClick={()=>setView("form")} small>+ Reportar</Btn>
+        <Btn onClick={abrirFormulario} small>+ Reportar</Btn>
       </div>
       <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:8}}>
         <Chip label="Todos" active={catF==="todos"} onClick={()=>setCatF("todos")} />
@@ -481,7 +663,7 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
               <div style={{display:"flex",gap:4,marginBottom:4,flexWrap:"wrap"}}>
                 <Pill label={p.estado==="encontrado"?"Encontrado":"Buscando"} color={p.estado==="encontrado"?C.green:C.amber} bg={p.estado==="encontrado"?C.greenLt:C.amberLt} />
                 <Pill label={cat.label} color={cat.color} bg={cat.bg} />
-                {p._off&&<Pill label="" color={C.muted} bg="#F1F5F9" />}
+                {p._off&&<Pill label="En tu teléfono" color={C.amber} bg={C.amberLt} />}
               </div>
               <div style={{fontWeight:800,fontSize:15,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.nombre}</div>
               {p.hospital&&<div style={{fontSize:12,color:C.sky,fontWeight:600}}>{p.hospital}</div>}
@@ -672,6 +854,7 @@ function ZonasSection({ online, onToast, dataVersion }: SectionProps) {
   const [asistentes, setAsistentes] = useState<Record<string, Asistente[]>>(getAsistentes());
   const [yoAsisto, setYoAsisto] = useState<Record<string, Asistente>>(getYoAsisto());
   const [showModal, setShowModal] = useState(false);
+  const [alertaCompartir, setAlertaCompartir] = useState<BaseRecord | null>(null);
   const [f, setF] = useState({ nombre:"",estado:"",pais:"Venezuela",descripcion:"",lat:null as number | null,lng:null as number | null,insumos:[] as string[],ayuda:[] as string[],personal:[] as string[],contactoNombre:"",contacto:"",urgencia:"critica" });
 
   const reload = useCallback(async () => setItems(await IDB.getAll("zonas")), []);
@@ -713,7 +896,8 @@ function ZonasSection({ online, onToast, dataVersion }: SectionProps) {
 
     if (!online || !navigator.onLine) {
       addQ(queueItem)
-      onToast('Zona guardada ✓ Se publicará al reconectar', 'ok')
+      onToast('Zona guardada ✓ Comparte la alerta ahora (SMS/QR)', 'ok')
+      setAlertaCompartir(item)
     } else {
       try {
         const { error } = await Promise.race([
@@ -727,11 +911,13 @@ function ZonasSection({ online, onToast, dataVersion }: SectionProps) {
         onToast('Zona publicada correctamente', 'ok')
         if (f.urgencia === 'critica') {
           enviarNotificacion(notificacionZonaCritica(item)).catch(() => {})
+          setAlertaCompartir(item)
         }
       } catch (e: unknown) {
         console.error('saveZona error:', e)
         addQ(queueItem)
-        onToast('Zona guardada ✓ Se sincronizará en breve', 'ok')
+        onToast('Zona guardada ✓ Comparte por SMS/QR mientras no hay red', 'ok')
+        setAlertaCompartir(item)
       }
     }
     await reload()
@@ -801,6 +987,11 @@ function ZonasSection({ online, onToast, dataVersion }: SectionProps) {
             onAsistir={() => setShowModal(true)}
             onRetirar={handleRetirar}
           />
+          <div style={{ marginTop: 14 }}>
+            <Btn outline color={C.red} full onClick={() => setAlertaCompartir(sel)}>
+              🚨 Compartir alerta sin internet (SMS / QR)
+            </Btn>
+          </div>
         </Card>
 
         {showModal && (
@@ -819,6 +1010,7 @@ function ZonasSection({ online, onToast, dataVersion }: SectionProps) {
   if (view === "form") return (
     <div>
       <ProtocoloZonasBanner />
+      <RedRescate zonas={items} online={online} onToast={onToast} alertaRecienGuardada={alertaCompartir} onCerrarAlerta={() => setAlertaCompartir(null)} onImportada={reload} />
       <Back onClick={() => setView("list")} />
       <Card>
         <h3 style={{ margin: "0 0 4px", fontWeight: 800 }}>Reportar Zona de Crisis</h3>
@@ -852,6 +1044,7 @@ function ZonasSection({ online, onToast, dataVersion }: SectionProps) {
   return (
     <div>
       <ProtocoloZonasBanner />
+      <RedRescate zonas={items} online={online} onToast={onToast} alertaRecienGuardada={alertaCompartir} onCerrarAlerta={() => setAlertaCompartir(null)} onImportada={reload} />
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 14 }}>
         {URGENCIAS.map(u => <StatBox key={u.id} n={items.filter((z: BaseRecord) => z.urgencia === u.id).length} label={u.statLabel} color={u.color} />)}
       </div>
@@ -1960,7 +2153,10 @@ export default function CrisisVE() {
   const onToast = useCallback((msg: string, type: ToastType = "ok") => setToast({msg,type}), []);
 
   const sincronizar = useCallback(async (silent = false) => {
-    if (typeof navigator === 'undefined' || !navigator.onLine || syncingRef.current) return
+    if (typeof navigator === 'undefined' || syncingRef.current) return
+    const red = await hayInternetReal()
+    setOnline(red)
+    if (!red) return
     syncingRef.current = true
     setSyncing(true)
     try {
@@ -2003,11 +2199,24 @@ export default function CrisisVE() {
   }, [sincronizar])
 
   useEffect(() => {
-    const up = () => { setOnline(true); sincronizar() }
-    const down = () => setOnline(false)
-    window.addEventListener("online", up)
-    window.addEventListener("offline", down)
-    return () => { window.removeEventListener("online", up); window.removeEventListener("offline", down) }
+    const probe = async () => {
+      if (!navigator.onLine) {
+        setOnline(false)
+        return
+      }
+      setOnline(await hayInternetReal())
+    }
+    probe()
+    const onUp = () => { probe(); sincronizar() }
+    const onDown = () => setOnline(false)
+    window.addEventListener('online', onUp)
+    window.addEventListener('offline', onDown)
+    const iv = setInterval(probe, 30000)
+    return () => {
+      window.removeEventListener('online', onUp)
+      window.removeEventListener('offline', onDown)
+      clearInterval(iv)
+    }
   }, [sincronizar])
 
   useEffect(() => {
@@ -2037,7 +2246,7 @@ export default function CrisisVE() {
         </div>
       </div>
 
-      <OfflineBanner pending={pending} syncing={syncing} />
+      <OfflineBanner pending={pending} syncing={syncing} online={online} />
 
       {/* TABS */}
       <div style={{display:"flex",background:"white",borderBottom:`1px solid ${C.border}`,position:"sticky",top:52,zIndex:90}}>
