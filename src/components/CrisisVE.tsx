@@ -1053,35 +1053,58 @@ function calcTotalesPorDestino(dons: BaseRecord[]) {
   return mapa;
 }
 
-// IDB store para campañas de ORGs
-const ORG_KEY = "crisisve_campanas_v1";
-const getCampanas = (): BaseRecord[] => { try { return JSON.parse(localStorage.getItem(ORG_KEY) || "[]"); } catch { return []; } };
-const saveCampanas = (d: BaseRecord[]) => { try { localStorage.setItem(ORG_KEY, JSON.stringify(d)); } catch {} };
+type Aliado = {
+  id: string
+  nombre: string
+  logo: string
+  tipo: "match" | "fijo"
+  porcentaje?: number
+  hasta?: number
+  aportado: number
+  contacto: string
+  descripcion: string
+}
+
+const ALIADOS_INICIALES: Aliado[] = [
+  { id: "1", nombre: "Tu empresa aquí", logo: "", tipo: "match", porcentaje: 25, hasta: 50000, aportado: 0, contacto: "reconstruyendovzla26@gmail.com", descripcion: "Únete como aliado y duplica el impacto de cada donación" },
+]
+
+const ALIADO_COLORS = ["#2563EB", "#0EA5E9", "#0D9488", "#7C3AED", "#D97706"]
+
+function aliadoIniciales(nombre: string) {
+  return nombre.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]?.toUpperCase() || "").join("")
+}
+
+function calcAliadosStats(aliados: Aliado[]) {
+  const totalAportado = aliados.reduce((s, a) => s + (a.aportado || 0), 0)
+  const totalMatches = aliados.filter(a => a.tipo === "match").reduce((s, a) => s + (a.aportado || 0), 0)
+  return { totalAportado, totalMatches, count: aliados.length }
+}
 
 function DonacionesSection({ online, onToast }: SectionProps) {
-  const [dons, setDons] = useState<BaseRecord[]>([]);
-  const [campanas, setCampanas] = useState<BaseRecord[]>(getCampanas());
-  const [view, setView] = useState("main"); // main | donar | campana | detalle_campana | detalle_don
-  const [sel, setSel] = useState<BaseRecord | null>(null);
-  const [tab2, setTab2] = useState("donaciones"); // donaciones | campanas | desglose
-  const [comp, setComp] = useState<string | null>(null);
-  const [logo, setLogo] = useState<string | null>(null);
+  const [dons, setDons] = useState<BaseRecord[]>([])
+  const [aliados] = useState<Aliado[]>(ALIADOS_INICIALES)
+  const [view, setView] = useState("main") // main | donar
+  const [tab2, setTab2] = useState("donaciones") // donaciones | aliados | desglose
+  const [comp, setComp] = useState<string | null>(null)
 
   // Form donación
-  const [fd, setFd] = useState({ monto:"", moneda:"USD", metodo:"Zelle", nombre:"", mensaje:"", destinos:[] as string[] });
-  // Form campaña ORG
-  const [fc, setFc] = useState({ nombre:"", tipo:"org", descripcion:"", meta:"", moneda:"USD", destinos:[] as string[], contacto:"", zelle:"", pagoMovil:"", banco:"", cuenta:"", pais:"Venezuela" });
+  const [fd, setFd] = useState({ monto:"", moneda:"USD", metodo:"Zelle", nombre:"", mensaje:"", destinos:[] as string[] })
 
-  const reload = useCallback(async () => setDons(await IDB.getAll("donaciones")), []);
-  useEffect(() => { reload(); }, [reload]);
+  const reload = useCallback(async () => setDons(await IDB.getAll("donaciones")), [])
+  useEffect(() => { reload() }, [reload])
 
-  const togD = (v: string) => setFd(x => ({ ...x, destinos: x.destinos.includes(v) ? x.destinos.filter((d: string) => d !== v) : [...x.destinos, v] }));
-  const togC = (v: string) => setFc(x => ({ ...x, destinos: x.destinos.includes(v) ? x.destinos.filter((d: string) => d !== v) : [...x.destinos, v] }));
+  const togD = (v: string) => setFd(x => ({ ...x, destinos: x.destinos.includes(v) ? x.destinos.filter((d: string) => d !== v) : [...x.destinos, v] }))
 
-  const totalUSD = dons.filter((d: BaseRecord) => d.moneda === "USD" && d.verificado).reduce((s, d) => s + parseFloat(d.monto || 0), 0);
-  const totalBS  = dons.filter((d: BaseRecord) => d.moneda === "Bs"  && d.verificado).reduce((s, d) => s + parseFloat(d.monto || 0), 0);
-  const pendientes = dons.filter((d: BaseRecord) => !d.verificado).length;
-  const totalesPorDestino = calcTotalesPorDestino(dons);
+  const totalUSD = dons.filter((d: BaseRecord) => d.moneda === "USD" && d.verificado).reduce((s, d) => s + parseFloat(d.monto || 0), 0)
+  const totalBS  = dons.filter((d: BaseRecord) => d.moneda === "Bs"  && d.verificado).reduce((s, d) => s + parseFloat(d.monto || 0), 0)
+  const numDonantes = dons.filter((d: BaseRecord) => d.verificado).length
+  const totalesPorDestino = calcTotalesPorDestino(dons)
+  const { totalAportado: totalAliadosUSD, totalMatches, count: numAliados } = calcAliadosStats(aliados)
+  const totalRecaudado = totalUSD + totalMatches
+  const metaUSD = 10000
+  const pctMeta = Math.min((totalRecaudado / metaUSD) * 100, 100)
+  const mailtoAliado = "mailto:reconstruyendovzla26@gmail.com?subject=" + encodeURIComponent("Quiero ser aliado de Reconstruyendo Venezuela")
 
   const saveDon = async () => {
     if (!fd.monto || !fd.nombre) { onToast("Monto y nombre son obligatorios", "warn"); return; }
@@ -1093,16 +1116,6 @@ function DonacionesSection({ online, onToast }: SectionProps) {
     await reload(); setView("main"); setComp(null);
     setFd({ monto:"", moneda:"USD", metodo:"Zelle", nombre:"", mensaje:"", destinos:[] as string[] });
     onToast("¡Gracias! Tu donación fue registrada y se verificará pronto.", "ok");
-  };
-
-  const saveCampana = () => {
-    if (!fc.nombre || !fc.contacto || !fc.destinos.length) { onToast("Nombre, contacto y al menos un destino son obligatorios", "warn"); return; }
-    const item = { ...fc, logo, id: uid(), ts: now(), totalRecaudado: 0, donantes: 0, _off: !online };
-    const nueva = [item, ...campanas];
-    saveCampanas(nueva); setCampanas(nueva); setView("main");
-    setFc({ nombre:"", tipo:"org", descripcion:"", meta:"", moneda:"USD", destinos:[] as string[], contacto:"", zelle:"", pagoMovil:"", banco:"", cuenta:"", pais:"Venezuela" });
-    setLogo(null);
-    onToast("Campaña registrada — ¡gracias por organizarte!", "ok");
   };
 
   // ── FORM DONACIÓN ──────────────────────────────────────────
@@ -1173,117 +1186,6 @@ function DonacionesSection({ online, onToast }: SectionProps) {
     </div>
   );
 
-  // ── FORM CAMPAÑA ORG ───────────────────────────────────────
-  if (view === "campana") return (
-    <div>
-      <Back onClick={() => setView("main")} />
-      <Card>
-        <h3 style={{ margin:"0 0 4px", fontWeight:800 }}>Registrar Campaña de Recolección</h3>
-        <p style={{ margin:"0 0 14px", fontSize:12, color:C.muted }}>Para ORGs, fundaciones y personas que están organizando recolecciones. Toda la información es pública y verificable.</p>
-
-        <PhotoUpload preview={logo} onFile={setLogo} label="Logo o foto de la org" />
-
-        <Field label="Tipo">
-          <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-            {[["org","Organización / Fundación"],["empresa","Empresa / Negocio"]].map(([v,l]) => (
-              <Chip key={v} label={l} active={fc.tipo===v} onClick={() => setFc(x=>({...x,tipo:v}))} />
-            ))}
-          </div>
-        </Field>
-
-        <Field label="Nombre de la org / persona / colectivo *"><Input value={fc.nombre} onChange={v=>setFc(x=>({...x,nombre:v}))} placeholder="Ej: Fundación Manos Unidas / María García" /></Field>
-        <Field label="País de origen"><Input value={fc.pais} onChange={v=>setFc(x=>({...x,pais:v}))} placeholder="Venezuela, Colombia, España…" /></Field>
-        <Field label="Descripción de la campaña"><Textarea value={fc.descripcion} onChange={v=>setFc(x=>({...x,descripcion:v}))} placeholder="Qué están haciendo, cómo van a usar los fondos, dónde están trabajando…" rows={3} /></Field>
-
-        <Field label="¿Para qué van los fondos recolectados? * (selecciona todos)">
-          {DESTINOS.map(cat => (
-            <div key={cat.cat} style={{ marginBottom:12 }}>
-              <div style={{ fontSize:11, fontWeight:800, color:C.muted, textTransform:"uppercase", marginBottom:6 }}>{cat.cat}</div>
-              <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
-                {cat.items.map((i: string) => {
-                  const cc = CAT_COLORS[cat.cat] || { color:C.primary, bg:C.primaryLt };
-                  return <Chip key={i} label={i} active={fc.destinos.includes(i)} onClick={() => togC(i)} color={cc.color} />;
-                })}
-              </div>
-            </div>
-          ))}
-        </Field>
-
-        {fc.destinos.length > 0 && (
-          <div style={{ background:C.greenLt, borderRadius:10, padding:12, marginBottom:14 }}>
-            <div style={{ fontSize:11, fontWeight:700, color:C.green, marginBottom:6 }}> Esta campaña cubre:</div>
-            <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
-              {fc.destinos.map((d: string) => { const cc=catForDestino(d); return <Pill key={d} label={d} color={cc.color} bg={cc.bg} />; })}
-            </div>
-          </div>
-        )}
-
-        <div style={{ background:C.bg, borderRadius:10, padding:14, marginBottom:14 }}>
-          <div style={{ fontSize:12, fontWeight:800, marginBottom:10 }}>¿Cómo pueden donarles a ustedes?</div>
-          <Field label="Zelle (email o teléfono)"><Input value={fc.zelle} onChange={v=>setFc(x=>({...x,zelle:v}))} placeholder="Ej: fundacion@gmail.com" /></Field>
-          <Field label="Pago Móvil (banco · CI · teléfono)"><Input value={fc.pagoMovil} onChange={v=>setFc(x=>({...x,pagoMovil:v}))} placeholder="Banesco · V-12345678 · 0414-000-0000" /></Field>
-          <Field label="Banco y número de cuenta"><Input value={fc.cuenta} onChange={v=>setFc(x=>({...x,cuenta:v}))} placeholder="Banesco · 0134-0000-00-0000000000" /></Field>
-        </div>
-
-        <Field label="Meta de recaudación (opcional)">
-          <div style={{ display:"flex", gap:8 }}>
-            <div style={{ flex:1 }}><Input value={fc.meta} onChange={v=>setFc(x=>({...x,meta:v}))} placeholder="Ej: 5000" type="number" /></div>
-            <div style={{ display:"flex", gap:5 }}>
-              {["USD","Bs"].map((m: string) => <Chip key={m} label={m} active={fc.moneda===m} onClick={() => setFc(x=>({...x,moneda:m}))} />)}
-            </div>
-          </div>
-        </Field>
-        <Field label="Contacto principal *"><Input value={fc.contacto} onChange={v=>setFc(x=>({...x,contacto:v}))} placeholder="+58 414-000-0000 / @usuario / email" /></Field>
-        <Btn onClick={saveCampana} full color={C.teal}> Publicar Campaña</Btn>
-      </Card>
-    </div>
-  );
-
-  // ── DETALLE CAMPAÑA ────────────────────────────────────────
-  if (view === "detalle_campana" && sel) {
-    const tipoLabel: Record<string, string> = { org:"Organización", persona:"Persona", empresa:"Empresa", comunidad:"Colectivo" };
-    return (
-      <div>
-        <Back onClick={() => { setSel(null); setView("main"); }} />
-        <Card>
-          {sel.logo && <img src={sel.logo} alt="" style={{ width:72, height:72, borderRadius:12, objectFit:"cover", marginBottom:12 }} />}
-          <Pill label={tipoLabel[sel.tipo]||sel.tipo} color={C.teal} bg={C.tealLt} />
-          <h2 style={{ margin:"8px 0 4px", fontSize:20, fontWeight:800 }}>{sel.nombre}</h2>
-          <p style={{ margin:"0 0 4px", fontSize:12, color:C.muted }}>{sel.pais} · {fmtDate(sel.ts)}</p>
-          {sel.descripcion && <div style={{ background:C.bg, borderRadius:10, padding:12, margin:"12px 0", fontSize:13, lineHeight:1.6 }}>{sel.descripcion}</div>}
-
-          {sel.destinos?.length > 0 && (
-            <div style={{ marginBottom:14 }}>
-              <div style={{ fontSize:11, fontWeight:700, color:C.muted, textTransform:"uppercase", marginBottom:8 }}>Esta campaña cubre</div>
-              <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
-                {sel.destinos.map((d: string) => { const cc=catForDestino(d); return <Pill key={d} label={d} color={cc.color} bg={cc.bg} />; })}
-              </div>
-            </div>
-          )}
-
-          {sel.meta && (
-            <div style={{ background:C.primaryLt, borderRadius:10, padding:14, marginBottom:14 }}>
-              <div style={{ fontSize:11, fontWeight:700, color:C.primary, marginBottom:4 }}>META DE RECAUDACIÓN</div>
-              <div style={{ fontSize:22, fontWeight:900, color:C.primary }}>{sel.moneda==="USD"?"$":""}{parseFloat(sel.meta).toLocaleString()} {sel.moneda}</div>
-            </div>
-          )}
-
-          <div style={{ background:C.bg, borderRadius:10, padding:14, marginBottom:14 }}>
-            <div style={{ fontSize:12, fontWeight:800, marginBottom:10 }}>Donar a esta campaña</div>
-            {sel.zelle     && <div style={{ marginBottom:8 }}><div style={{ fontSize:11, color:C.muted, fontWeight:600 }}>ZELLE</div><div style={{ fontSize:14, fontWeight:700 }}>{sel.zelle}</div></div>}
-            {sel.pagoMovil && <div style={{ marginBottom:8 }}><div style={{ fontSize:11, color:C.muted, fontWeight:600 }}>PAGO MÓVIL</div><div style={{ fontSize:14, fontWeight:700 }}>{sel.pagoMovil}</div></div>}
-            {sel.cuenta    && <div style={{ marginBottom:8 }}><div style={{ fontSize:11, color:C.muted, fontWeight:600 }}>TRANSFERENCIA</div><div style={{ fontSize:14, fontWeight:700 }}>{sel.cuenta}</div></div>}
-          </div>
-
-          <div style={{ borderTop:`1px solid ${C.border}`, paddingTop:14 }}>
-            <div style={{ fontSize:11, fontWeight:700, color:C.muted, textTransform:"uppercase", marginBottom:6 }}>Contacto</div>
-            <p style={{ margin:0, fontSize:15, fontWeight:800, color:C.teal }}>{sel.contacto}</p>
-          </div>
-        </Card>
-      </div>
-    );
-  }
-
   // ── MAIN VIEW ──────────────────────────────────────────────
   const topDestinos = Object.entries(totalesPorDestino)
     .sort((a,b) => ((b[1] as {usd:number;bs:number}).usd + (b[1] as {usd:number;bs:number}).bs/40000) - ((a[1] as {usd:number;bs:number}).usd + (a[1] as {usd:number;bs:number}).bs/40000))
@@ -1300,31 +1202,44 @@ function DonacionesSection({ online, onToast }: SectionProps) {
         Donar en GoFundMe
       </a>
       {/* HERO */}
-      <div style={{background:'linear-gradient(135deg, #1D4ED8 0%, #0EA5E9 100%)', borderRadius:16, padding:24, marginBottom:14, color:'white', position:'relative', overflow:'hidden'}}>
-        <div style={{position:'absolute', top:12, right:12, display:'flex', alignItems:'center', gap:6, background:'rgba(255,255,255,0.15)', borderRadius:20, padding:'4px 10px'}}>
-          <div style={{width:8, height:8, borderRadius:'50%', background:'#4ADE80'}} />
-          <span style={{fontSize:11, fontWeight:700}}>EN VIVO</span>
+      <div style={{ background: 'linear-gradient(160deg, #0B1F4D 0%, #1E3A8A 55%, #1D4ED8 100%)', borderRadius: 16, padding: 24, marginBottom: 14, color: 'white', position: 'relative', overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', top: 12, right: 12, display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(255,255,255,0.12)', borderRadius: 20, padding: '4px 10px' }}>
+          <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#4ADE80' }} />
+          <span style={{ fontSize: 11, fontWeight: 700 }}>EN VIVO</span>
         </div>
-        <div style={{fontSize:11, fontWeight:700, opacity:.85, marginBottom:4, textTransform:'uppercase', letterSpacing:'0.5px'}}>Total recaudado para las víctimas</div>
-        <div style={{fontSize:40, fontWeight:900, letterSpacing:'-1px', lineHeight:1}}>
-          ${totalUSD.toLocaleString('es-VE',{minimumFractionDigits:2, maximumFractionDigits:2})} <span style={{fontSize:20}}>USD</span>
+        <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.85, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.6px' }}>Recaudado para la reconstrucción</div>
+        <div style={{ fontSize: 42, fontWeight: 900, letterSpacing: '-1px', lineHeight: 1, marginBottom: 14 }}>
+          ${totalRecaudado.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
         </div>
-        {totalBS > 0 && <div style={{fontSize:16, fontWeight:700, opacity:.85, marginTop:4}}>{totalBS.toLocaleString('es-VE')} Bs</div>}
-        <div style={{margin:'12px 0 6px', background:'rgba(255,255,255,0.2)', borderRadius:20, height:6}}>
-          <div style={{background:'#4ADE80', width:`${Math.min((totalUSD/10000)*100, 100)}%`, height:'100%', borderRadius:20, transition:'width 1s'}} />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
+          <div style={{ background: 'rgba(255,255,255,0.1)', borderRadius: 10, padding: '10px 12px' }}>
+            <div style={{ fontSize: 10, fontWeight: 700, opacity: 0.75, textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: 4 }}>Total donaciones</div>
+            <div style={{ fontSize: 18, fontWeight: 800 }}>${totalUSD.toLocaleString('es-VE', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</div>
+          </div>
+          <div style={{ background: 'rgba(255,255,255,0.1)', borderRadius: 10, padding: '10px 12px' }}>
+            <div style={{ fontSize: 10, fontWeight: 700, opacity: 0.75, textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: 4 }}>Total matches</div>
+            <div style={{ fontSize: 18, fontWeight: 800 }}>${totalMatches.toLocaleString('es-VE', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</div>
+          </div>
         </div>
-        <div style={{fontSize:11, opacity:.8}}>{dons.filter((d: BaseRecord)=>d.verificado).length} donantes · Meta: $10,000 USD</div>
-        <div style={{fontSize:11, opacity:.7, marginTop:4}}>Cada dólar va destinado a reconstruir hogares para familias damnificadas</div>
-        <div style={{display:'flex', gap:8, marginTop:14}}>
-          <button onClick={()=>setView('donar')} style={{flex:1, background:'white', color:'#1D4ED8', border:'none', borderRadius:9, padding:'10px', fontWeight:800, fontSize:13, cursor:'pointer'}}>Ya doné — registrar</button>
-          <button onClick={()=>setView('campana')} style={{flex:1, background:'rgba(255,255,255,0.2)', color:'white', border:'2px solid rgba(255,255,255,0.5)', borderRadius:9, padding:'10px', fontWeight:800, fontSize:13, cursor:'pointer'}}>Crear campaña</button>
+        <div style={{ margin: '0 0 8px', background: 'rgba(255,255,255,0.15)', borderRadius: 20, height: 8, overflow: 'hidden' }}>
+          <div style={{ background: 'linear-gradient(90deg, #FBBF24 0%, #4ADE80 100%)', width: `${pctMeta}%`, height: '100%', borderRadius: 20, transition: 'width 1s' }} />
+        </div>
+        <div style={{ fontSize: 12, opacity: 0.9, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ color: '#60A5FA', fontSize: 14, lineHeight: 1 }}>♥</span>
+          <span>{numDonantes} {numDonantes === 1 ? 'persona ha aportado' : 'personas han aportado'}</span>
+        </div>
+        {totalBS > 0 && <div style={{ fontSize: 13, fontWeight: 600, opacity: 0.8, marginTop: 6 }}>{totalBS.toLocaleString('es-VE')} Bs verificados</div>}
+        <div style={{ fontSize: 11, opacity: 0.7, marginTop: 4 }}>Meta: ${metaUSD.toLocaleString('es-VE')} USD · Cada dólar reconstruye hogares</div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+          <button onClick={() => setView('donar')} style={{ flex: 1, background: 'white', color: '#1D4ED8', border: 'none', borderRadius: 9, padding: '10px', fontWeight: 800, fontSize: 13, cursor: 'pointer' }}>Ya doné — registrar</button>
+          <a href={mailtoAliado} style={{ flex: 1, background: 'rgba(255,255,255,0.15)', color: 'white', border: '2px solid rgba(255,255,255,0.45)', borderRadius: 9, padding: '10px', fontWeight: 800, fontSize: 13, cursor: 'pointer', textAlign: 'center', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Quiero ser aliado</a>
         </div>
       </div>
 
       {/* SUBTABS */}
-      <div style={{ display:"flex", background:"white", borderRadius:12, padding:4, marginBottom:14, gap:4 }}>
-        {[["donaciones","Donaciones"],["campanas","Campañas"],["desglose","Desglose"]].map(([id,label]) => (
-          <button key={id} onClick={() => setTab2(id)} style={{ flex:1, padding:"8px 4px", borderRadius:9, border:"none", background:tab2===id?C.primary:"transparent", color:tab2===id?"white":C.muted, fontWeight:700, fontSize:12, cursor:"pointer", transition:"all .15s" }}>{label}</button>
+      <div style={{ display: "flex", background: "white", borderRadius: 12, padding: 4, marginBottom: 14, gap: 4 }}>
+        {[["donaciones", "Donaciones"], ["aliados", "Aliados"], ["desglose", "Desglose"]].map(([id, label]) => (
+          <button key={id} onClick={() => setTab2(id)} style={{ flex: 1, padding: "8px 4px", borderRadius: 9, border: "none", background: tab2 === id ? C.primary : "transparent", color: tab2 === id ? "white" : C.muted, fontWeight: 700, fontSize: 12, cursor: "pointer", transition: "all .15s" }}>{label}</button>
         ))}
       </div>
 
@@ -1357,45 +1272,65 @@ function DonacionesSection({ online, onToast }: SectionProps) {
         </div>
       )}
 
-      {/* TAB: CAMPAÑAS */}
-      {tab2 === "campanas" && (
+      {/* TAB: ALIADOS */}
+      {tab2 === "aliados" && (
         <div>
-          {campanas.length === 0
-            ? (
-              <div style={{ textAlign:"center", padding:"40px 20px" }}>
-                <div style={{ fontSize:44, marginBottom:10 }}></div>
-                <div style={{ fontWeight:700, fontSize:15, marginBottom:6 }}>Sin campañas registradas</div>
-                <p style={{ fontSize:13, color:C.muted, marginBottom:16 }}>¿Eres una org o persona que está recolectando ayuda?<br/>Regístrala aquí para que todos puedan apoyarte.</p>
-                <Btn onClick={() => setView("campana")} color={C.teal}>Registrar mi campaña</Btn>
+          <div style={{ background: 'linear-gradient(160deg, #0B1F4D 0%, #1E3A8A 55%, #1D4ED8 100%)', borderRadius: 16, padding: 22, marginBottom: 14, color: 'white' }}>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.8px', textTransform: 'uppercase', opacity: 0.85, marginBottom: 8 }}>Aliados de la reconstrucción</div>
+            <div style={{ fontSize: 36, fontWeight: 900, lineHeight: 1, marginBottom: 12 }}>{numAliados}</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, opacity: 0.75, textTransform: 'uppercase', marginBottom: 4 }}>Total aportado</div>
+                <div style={{ fontSize: 20, fontWeight: 800 }}>${totalAliadosUSD.toLocaleString('es-VE')}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, opacity: 0.75, textTransform: 'uppercase', marginBottom: 4 }}>Matches generados</div>
+                <div style={{ fontSize: 20, fontWeight: 800 }}>${totalMatches.toLocaleString('es-VE')}</div>
+              </div>
+            </div>
+            <a href={mailtoAliado} style={{ display: 'block', background: 'white', color: '#1D4ED8', textAlign: 'center', padding: '12px', borderRadius: 10, fontWeight: 800, fontSize: 14, textDecoration: 'none' }}>
+              Quiero ser aliado
+            </a>
+          </div>
+
+          {aliados.map((a, idx) => {
+            const color = ALIADO_COLORS[idx % ALIADO_COLORS.length]
+            const matchPct = a.tipo === "match" && a.hasta ? Math.min((a.aportado / a.hasta) * 100, 100) : 0
+            return (
+              <div key={a.id} style={{ background: 'white', borderRadius: 12, padding: '14px 16px', marginBottom: 10, boxShadow: '0 1px 3px rgba(0,0,0,0.07)', borderLeft: `4px solid ${color}` }}>
+                <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                  {a.logo
+                    ? <img src={a.logo} alt={a.nombre} style={{ width: 52, height: 52, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
+                    : <div style={{ width: 52, height: 52, borderRadius: '50%', background: color, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 16, flexShrink: 0 }}>{aliadoIniciales(a.nombre)}</div>
+                  }
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 4 }}>{a.nombre}</div>
+                    {a.tipo === "match" ? (
+                      <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>
+                        <span style={{ fontWeight: 700, color: color }}>Match {a.porcentaje}%</span>
+                        {a.hasta ? <> · Hasta ${a.hasta.toLocaleString('es-VE')}</> : null}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 12, fontWeight: 700, color: color, marginBottom: 4 }}>Aportó ${a.aportado.toLocaleString('es-VE')}</div>
+                    )}
+                    {a.descripcion && <div style={{ fontSize: 12, color: C.muted, marginBottom: 8, lineHeight: 1.5 }}>{a.descripcion}</div>}
+                    <div style={{ fontSize: 13, fontWeight: 700, color: C.txt }}>Aportado: ${a.aportado.toLocaleString('es-VE')} USD</div>
+                    {a.tipo === "match" && a.hasta ? (
+                      <div style={{ marginTop: 8 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: C.muted, marginBottom: 4 }}>
+                          <span>Progreso del match</span>
+                          <span>{Math.round(matchPct)}%</span>
+                        </div>
+                        <div style={{ background: '#F1F5F9', borderRadius: 20, height: 6, overflow: 'hidden' }}>
+                          <div style={{ background: `linear-gradient(90deg, #FBBF24 0%, ${color} 100%)`, width: `${matchPct}%`, height: '100%', borderRadius: 20, transition: 'width 0.5s' }} />
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
               </div>
             )
-            : campanas.map((c: BaseRecord) => {
-                const tipoLabel: Record<string, string> = { org:"Org", persona:"Persona", empresa:"Empresa", comunidad:"Colectivo" };
-                return (
-                  <div key={c.id} onClick={() => { setSel(c); setView("detalle_campana"); }} style={{ background:"white", borderRadius:12, padding:"14px 16px", marginBottom:10, cursor:"pointer", borderLeft:`4px solid ${C.teal}`, boxShadow:"0 1px 3px rgba(0,0,0,0.07)", display:"flex", gap:12 }}>
-                    {c.logo
-                      ? <img src={c.logo} alt="" style={{ width:52, height:52, borderRadius:10, objectFit:"cover", flexShrink:0 }} />
-                      : <div style={{ width:52, height:52, borderRadius:10, background:C.tealLt, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, flexShrink:0 }}></div>
-                    }
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ display:"flex", gap:5, marginBottom:5, flexWrap:"wrap" }}>
-                        <Pill label={tipoLabel[c.tipo]||c.tipo} color={C.teal} bg={C.tealLt} />
-                        <Pill label={`${c.pais}`} color={C.primary} bg={C.primaryLt} />
-                      </div>
-                      <div style={{ fontWeight:800, fontSize:15, marginBottom:2 }}>{c.nombre}</div>
-                      {c.descripcion && <div style={{ fontSize:12, color:C.muted, marginBottom:6, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{c.descripcion}</div>}
-                      {c.destinos?.length > 0 && (
-                        <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
-                          {c.destinos.slice(0,3).map((d: string) => { const cc=catForDestino(d); return <Pill key={d} label={d} color={cc.color} bg={cc.bg} />; })}
-                          {c.destinos.length > 3 && <Pill label={`+${c.destinos.length-3}`} color={C.muted} bg="#F1F5F9" />}
-                        </div>
-                      )}
-                      {c.meta && <div style={{ fontSize:12, color:C.primary, fontWeight:700, marginTop:4 }}>Meta: {c.moneda==="USD"?"$":""}{parseFloat(c.meta).toLocaleString()} {c.moneda}</div>}
-                    </div>
-                  </div>
-                );
-              })
-          }
+          })}
         </div>
       )}
 
