@@ -25,6 +25,7 @@ import { RedRescate } from '@/components/RedRescate'
 import { CompartirSinInternet } from '@/components/CompartirSinInternet'
 import { compressImage } from '@/lib/compress-image'
 import { esCreadorDelReporte, registrarCreadorDesdeItem } from '@/lib/creador-reporte'
+import { supabase } from '@/lib/supabase'
 
 type ToastType = "ok" | "warn" | "green" | string
 type SectionProps = { online: boolean; onToast: (msg: string, type?: ToastType) => void; dataVersion: number }
@@ -90,6 +91,34 @@ const MSG_BTN_PUBLICAR = 'PUBLICAR'
 
 function btnPublicar(_online: boolean, etiqueta = 'PUBLICAR'): string {
   return etiqueta === 'PUBLICAR' ? MSG_BTN_PUBLICAR : etiqueta
+}
+
+function esBase64(val: unknown): boolean {
+  return typeof val === 'string' && val.startsWith('data:')
+}
+
+async function guardarYPublicar(
+  table: SupabaseTable,
+  itemToSave: Record<string, unknown>,
+  itemLocal: BaseRecord,
+  onToast: SectionProps['onToast']
+): Promise<void> {
+  await IDB.put(table, itemLocal)
+  registrarCreadorDesdeItem(itemLocal)
+  try {
+    const { error } = await supabase.from(table).insert(itemToSave)
+    if (error) {
+      console.error('Supabase error:', error)
+      addQ({ table, action: 'insert', data: itemLocal })
+      onToast('Guardado localmente. Se publicará cuando haya conexión.', 'warn')
+    } else {
+      onToast('Publicado correctamente', 'ok')
+    }
+  } catch (e) {
+    console.error('Error:', e)
+    addQ({ table, action: 'insert', data: itemLocal })
+    onToast('Guardado localmente. Se publicará cuando haya conexión.', 'warn')
+  }
 }
 
 type PublicarResult = { ok: boolean; enRed: boolean }
@@ -578,7 +607,7 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
     return () => { cancelled = true; };
   }, [view]);
 
-  const save = async () => {
+  const savePersona = async () => {
     if (saving) return;
     if (!f.contactoNombre.trim() || !f.contacto.trim()) {
       onToast("Tu nombre y contacto son obligatorios — los coordinadores deben poder localizarte", "warn");
@@ -607,10 +636,13 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
     try {
       const fotoFinal = foto ? await compressImage(foto) : null;
       const previo = editingId ? await IDB.get('personas', editingId) : null;
-      const item: BaseRecord = {
-        ...(previo || {}),
-        id: editingId || uid(),
-        ts: previo?.ts || now(),
+      const id = editingId || uid();
+      const created_at = previo?.created_at ? String(previo.created_at) : new Date().toISOString();
+      const estado = String(previo?.estado || 'buscando');
+
+      const itemToSave: Record<string, unknown> = {
+        id,
+        created_at,
         nombre,
         edad: f.edad,
         cat: f.cat,
@@ -619,26 +651,26 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
         ubicacion: f.ubicacion,
         pais: f.pais,
         descripcion: f.descripcion,
-        contactoNombre: f.contactoNombre.trim(),
         contacto_nombre: f.contactoNombre.trim(),
         contacto: f.contacto.trim(),
-        reporta_nombre: f.contactoNombre.trim(),
-        reporta_contacto: f.contacto.trim(),
+        estado,
         lat,
         lng,
+      };
+      if (fotoFinal && !esBase64(fotoFinal)) itemToSave.foto_url = fotoFinal;
+
+      const itemLocal = {
+        id,
+        ...itemToSave,
         foto: fotoFinal,
-        estado: previo?.estado || 'buscando',
-        created_at: previo?.created_at || new Date().toISOString(),
-      }
-      const { ok, enRed } = await publicarReporte("personas", item, online, onToast, {
-        mode: editingId ? 'upsert' : 'insert',
-      });
-      if (!ok) return;
+        contactoNombre: f.contactoNombre.trim(),
+      } as BaseRecord
+
+      await guardarYPublicar('personas', itemToSave, itemLocal, onToast);
       await reload();
-      setView("list");
+      setView('list');
       setFoto(null);
       setEditingId(null);
-      if (!enRed) setCompartir(item);
       setF({ nombre:"",edad:"",cat:"nino_sano",hospital:"",sala:"",ubicacion:"",pais:"Venezuela",descripcion:"",contactoNombre:"",contacto:"",lat:null as number | null,lng:null as number | null });
     } finally {
       setSaving(false);
@@ -838,7 +870,7 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
           <Field label="Última ubicación (texto, opcional)"><Input value={f.ubicacion} onChange={v=>setF(x=>({...x,ubicacion:v}))} placeholder="Ej: Sector Las Flores, La Guaira" /></Field>
           <Field label="País"><Input value={f.pais} onChange={v=>setF(x=>({...x,pais:v}))} placeholder="Venezuela" /></Field>
           <Field label="Descripción (ropa, señas, situación)"><Textarea value={f.descripcion} onChange={v=>setF(x=>({...x,descripcion:v}))} placeholder="Camisa azul, cabello corto…" /></Field>
-          <Btn onClick={save} full disabled={saving}>{saving ? "Publicando…" : (editingId ? 'PUBLICAR CAMBIOS' : btnPublicar(online, "Publicar Reporte"))}</Btn>
+          <Btn onClick={savePersona} full disabled={saving}>{saving ? "Publicando…" : (editingId ? 'PUBLICAR CAMBIOS' : btnPublicar(online, "Publicar Reporte"))}</Btn>
         </Card>
         {compartir && (
           <CompartirSinInternet item={compartir} onClose={() => setCompartir(null)} onToast={onToast} />
@@ -1151,12 +1183,14 @@ function ZonasSection({ online, onToast, dataVersion }: SectionProps) {
   const saveZona = async () => {
     if (!f.nombre || !f.contacto) { onToast('Nombre y contacto son obligatorios', 'warn'); return; }
     const previo = editingId ? await IDB.get('zonas', editingId) : null;
-    const item: BaseRecord = {
-      ...(previo || {}),
-      id: editingId || uid(),
-      ts: previo?.ts || now(),
+    const id = editingId || uid();
+    const created_at = previo?.created_at ? String(previo.created_at) : new Date().toISOString();
+    const estado_zona = String(previo?.estado_zona || 'activa');
+
+    const itemToSave: Record<string, unknown> = {
+      id,
+      created_at,
       nombre: f.nombre,
-      estado: f.estado,
       estado_vzla: f.estado,
       pais: f.pais,
       descripcion: f.descripcion,
@@ -1165,26 +1199,29 @@ function ZonasSection({ online, onToast, dataVersion }: SectionProps) {
       insumos: [...(f.insumos || [])],
       ayuda: [...(f.ayuda || [])],
       personal: [...(f.personal || [])],
-      contactoNombre: f.contactoNombre,
       contacto_nombre: f.contactoNombre,
       contacto: f.contacto,
       urgencia: f.urgencia,
-      estado_zona: previo?.estado_zona || 'activa',
-      created_at: previo?.created_at || new Date().toISOString(),
+      estado_zona,
+    };
+
+    const itemLocal = {
+      id,
+      ...itemToSave,
+      contactoNombre: f.contactoNombre,
+      estado: f.estado,
+    } as BaseRecord
+
+    const critica = f.urgencia === 'critica' && !editingId;
+    await guardarYPublicar('zonas', itemToSave, itemLocal, onToast);
+    if (critica) {
+      enviarNotificacion(notificacionZonaCritica(itemLocal)).catch(() => {});
+      setAlertaCompartir(itemLocal);
     }
-    const critica = f.urgencia === 'critica' && !editingId
-    const { enRed } = await publicarReporte('zonas', item, online, onToast, {
-      mode: editingId ? 'upsert' : 'insert',
-      ...(critica ? { notify: notificacionZonaCritica(item) } : {}),
-    })
-    if (critica && !editingId) {
-      if (enRed) enviarNotificacion(notificacionZonaCritica(item)).catch(() => {})
-      else setAlertaCompartir(item)
-    }
-    await reload()
-    setView('list')
-    setEditingId(null)
-    setF({ nombre:'', estado:'', pais:'Venezuela', descripcion:'', lat:null, lng:null, insumos:[], ayuda:[], personal:[], contactoNombre:'', contacto:'', urgencia:'critica' })
+    await reload();
+    setView('list');
+    setEditingId(null);
+    setF({ nombre:'', estado:'', pais:'Venezuela', descripcion:'', lat:null, lng:null, insumos:[], ayuda:[], personal:[], contactoNombre:'', contacto:'', urgencia:'critica' });
   };
 
   const handleAsistir = (data: Asistente) => {
@@ -1421,32 +1458,42 @@ function MascotasSection({ online, onToast, dataVersion }: SectionProps) {
     setView('form');
   };
 
-  const save = async () => {
+  const saveMascota = async () => {
     if (!f.ubicacion||!f.contacto) { onToast("Ubicación y contacto obligatorios","warn"); return; }
     const previo = editingId ? await IDB.get('mascotas', editingId) : null;
     const fotoFinal = foto ? await compressImage(foto) : null;
-    const item: BaseRecord = {
-      ...(previo || {}),
-      id: editingId || uid(),
-      ts: previo?.ts || now(),
+    const id = editingId || uid();
+    const created_at = previo?.created_at ? String(previo.created_at) : new Date().toISOString();
+
+    const itemToSave: Record<string, unknown> = {
+      id,
+      created_at,
       especie: f.especie,
-      tipo: f.especie,
       nombre: f.nombre,
       color: f.color,
       cat: f.cat,
       heridas: f.heridas,
-      descripcion: f.heridas,
       ubicacion: f.ubicacion,
+      contacto_nombre: f.contactoNombre,
       contacto: f.contacto,
-      contactoNombre: f.contactoNombre,
+      estado: f.cat,
       lat: f.lat ?? null,
       lng: f.lng ?? null,
+    };
+    if (fotoFinal && !esBase64(fotoFinal)) itemToSave.foto_url = fotoFinal;
+
+    const itemLocal = {
+      id,
+      ...itemToSave,
       foto: fotoFinal,
-      created_at: previo?.created_at || new Date().toISOString(),
-    }
-    const { ok } = await publicarReporte("mascotas", item, online, onToast, { mode: editingId ? 'upsert' : 'insert' });
-    if (!ok) return;
-    await reload(); setView("list"); setFoto(null); setEditingId(null);
+      contactoNombre: f.contactoNombre,
+    } as BaseRecord
+
+    await guardarYPublicar('mascotas', itemToSave, itemLocal, onToast);
+    await reload();
+    setView('list');
+    setFoto(null);
+    setEditingId(null);
     setF({ especie:"Perro",nombre:"",color:"",cat:"sana",heridas:"",ubicacion:"",contacto:"",contactoNombre:"",lat:null as number | null,lng:null as number | null });
   };
 
@@ -1484,7 +1531,7 @@ function MascotasSection({ online, onToast, dataVersion }: SectionProps) {
         </Field>
         <Field label="Tu nombre"><Input value={f.contactoNombre} onChange={v=>setF(x=>({...x,contactoNombre:v}))} placeholder="Quien reporta" /></Field>
         <Field label="Contacto *"><Input value={f.contacto} onChange={v=>setF(x=>({...x,contacto:v}))} placeholder="+58 414-000-0000" /></Field>
-        <Btn onClick={save} full>{editingId ? 'PUBLICAR CAMBIOS' : btnPublicar(online, 'PUBLICAR')}</Btn>
+        <Btn onClick={saveMascota} full>{editingId ? 'PUBLICAR CAMBIOS' : btnPublicar(online, 'PUBLICAR')}</Btn>
       </Card>
     </div>
   );
@@ -1574,29 +1621,35 @@ function VoluntariosSection({ online, onToast, dataVersion }: SectionProps) {
     setView('form');
   };
 
-  const save = async () => {
+  const saveVoluntario = async () => {
     if (!f.nombre||!f.contacto||!f.especialidades.length) { onToast("Nombre, especialidad y contacto obligatorios","warn"); return; }
     const previo = editingId ? await IDB.get('voluntarios', editingId) : null;
-    const item: BaseRecord = {
-      ...(previo || {}),
-      id: editingId || uid(),
-      ts: previo?.ts || now(),
+    const id = editingId || uid();
+    const created_at = previo?.created_at ? String(previo.created_at) : new Date().toISOString();
+    const idiomas = f.idiomas.split(',').map(s => s.trim());
+
+    const itemToSave: Record<string, unknown> = {
+      id,
+      created_at,
       nombre: f.nombre,
-      contacto: f.contacto,
       especialidades: [...f.especialidades],
-      pais: f.pais || "Venezuela",
+      pais: f.pais || 'Venezuela',
       ciudad: f.ciudad,
       remoto: puedeRemoto ? f.remoto : false,
-      idiomas: f.idiomas.split(",").map(s => s.trim()),
+      idiomas,
       bio: f.bio,
+      contacto: f.contacto,
+      estado: String(previo?.estado || 'disponible'),
       lat: f.lat ?? null,
       lng: f.lng ?? null,
-      estado: previo?.estado || "disponible",
-      created_at: previo?.created_at || new Date().toISOString(),
-    }
-    const { ok } = await publicarReporte("voluntarios", item, online, onToast, { mode: editingId ? 'upsert' : 'insert' });
-    if (!ok) return;
-    await reload(); setView("list"); setEditingId(null);
+    };
+
+    const itemLocal = { id, ...itemToSave } as BaseRecord
+
+    await guardarYPublicar('voluntarios', itemToSave, itemLocal, onToast);
+    await reload();
+    setView('list');
+    setEditingId(null);
     setF({ nombre:"",especialidades:[] as string[],pais:"Venezuela",ciudad:"",remoto:false,idiomas:"Español",bio:"",contacto:"",lat:null as number | null,lng:null as number | null });
   };
 
@@ -1641,7 +1694,7 @@ function VoluntariosSection({ online, onToast, dataVersion }: SectionProps) {
         </Field>
         <Field label="Sobre ti (opcional)"><Textarea value={f.bio} onChange={v=>setF(x=>({...x,bio:v}))} placeholder="Experiencia, equipamiento disponible…" rows={2} /></Field>
         <Field label="Contacto *"><Input value={f.contacto} onChange={v=>setF(x=>({...x,contacto:v}))} placeholder="+58 414-000-0000 / @usuario / email" /></Field>
-        <Btn onClick={save} full color={C.teal}>{editingId ? 'PUBLICAR CAMBIOS' : btnPublicar(online, 'PUBLICAR')}</Btn>
+        <Btn onClick={saveVoluntario} full color={C.teal}>{editingId ? 'PUBLICAR CAMBIOS' : btnPublicar(online, 'PUBLICAR')}</Btn>
       </Card>
     </div>
   );
@@ -1843,20 +1896,31 @@ function DonacionesSection({ online, onToast, dataVersion }: SectionProps) {
 
   const saveDon = async () => {
     if (!fd.monto || !fd.nombre) { onToast("Monto y nombre son obligatorios", "warn"); return; }
-    const item: BaseRecord = {
-      id: uid(),
-      ts: now(),
+    const id = uid();
+    const created_at = new Date().toISOString();
+
+    const itemToSave: Record<string, unknown> = {
+      id,
+      created_at,
       monto: fd.monto,
       moneda: fd.moneda,
       metodo: fd.metodo,
       nombre: fd.nombre,
       mensaje: fd.mensaje,
-      comprobante: comp ?? null,
       verificado: false,
-      created_at: new Date().toISOString(),
-    }
-    await publicarReporte("donaciones", item, online, onToast)
-    await reload(); setView("main"); setComp(null);
+    };
+    if (comp && !esBase64(comp)) itemToSave.comprobante_url = comp;
+
+    const itemLocal = {
+      id,
+      ...itemToSave,
+      comprobante: comp ?? null,
+    } as BaseRecord
+
+    await guardarYPublicar('donaciones', itemToSave, itemLocal, onToast);
+    await reload();
+    setView('main');
+    setComp(null);
     setFd({ monto:"", moneda:"USD", metodo:"Zelle", nombre:"", mensaje:"" });
   };
 
@@ -2203,52 +2267,87 @@ function RefugiosSection({ online, onToast, dataVersion }: SectionProps) {
     setView('list');
   };
 
-  // Guardar refugio
   const saveRefugio = async () => {
     if (!fr.nombre || !fr.contacto) { onToast("Nombre del refugio y contacto son obligatorios","warn"); return; }
     const previo = editingId ? await IDB.get('refugios', editingId) : null;
     const fotoFinal = foto ? await compressImage(foto) : (previo?.foto ?? null);
-    const item: BaseRecord = {
-      ...(previo || {}),
-      id: editingId || uid(),
-      ts: previo?.ts || now(),
+    const id = editingId || uid();
+    const created_at = previo?.created_at ? String(previo.created_at) : new Date().toISOString();
+    const personas = previo?.personas || [];
+
+    const itemToSave: Record<string, unknown> = {
+      id,
+      created_at,
       nombre: fr.nombre,
       direccion: fr.direccion,
       municipio: fr.municipio,
-      estado: fr.estado,
+      estado_vzla: fr.estado,
       pais: fr.pais,
       capacidad: fr.capacidad,
       descripcion: fr.descripcion,
       lat: fr.lat ?? null,
       lng: fr.lng ?? null,
       necesidades: [...(fr.necesidades || [])],
-      contactoNombre: fr.contactoNombre,
+      contacto_nombre: fr.contactoNombre,
       contacto: fr.contacto,
+      estado: fr.estado_refugio,
+      personas,
+    };
+    if (fotoFinal && !esBase64(fotoFinal)) itemToSave.foto_url = fotoFinal;
+
+    const itemLocal = {
+      id,
+      ...itemToSave,
       foto: fotoFinal,
-      personas: previo?.personas || [],
+      contactoNombre: fr.contactoNombre,
       estado_refugio: fr.estado_refugio,
-      created_at: previo?.created_at || new Date().toISOString(),
-    }
-    const { ok } = await publicarReporte("refugios", item, online, onToast, { mode: editingId ? 'upsert' : 'insert' });
-    if (!ok) return;
-    await reload(); setView("list"); setFoto(null); setEditingId(null);
+    } as BaseRecord
+
+    await guardarYPublicar('refugios', itemToSave, itemLocal, onToast);
+    await reload();
+    setView('list');
+    setFoto(null);
+    setEditingId(null);
     setFr({ nombre:"",direccion:"",municipio:"",estado:"",pais:"Venezuela",capacidad:"",descripcion:"",lat:null as number | null,lng:null as number | null,necesidades:[] as string[],contactoNombre:"",contacto:"",estado_refugio:"activo" });
   };
 
   // Guardar persona en refugio
-  const savePersona = async () => {
+  const savePersonaEnRefugio = async () => {
     if (!fp.nombre && !fp.tipo) { onToast("Ingresa al menos el tipo de persona","warn"); return; }
     const refugio = refugios.find(r => r.id === sel!.id);
     if (!refugio) return;
-    const persona = { ...fp, foto:fotoPer, id:uid(), ts:now() };
-    const updated: BaseRecord = {
-      ...refugio,
-      personas: [...(refugio.personas || []), persona],
-    }
-    await publicarReporte("refugios", updated, online, onToast, { mode: 'upsert' })
+    const persona = { ...fp, foto: fotoPer, id: uid(), ts: now() };
+    const personas = [...(refugio.personas || []), persona];
+    const id = String(refugio.id);
+    const created_at = refugio.created_at ? String(refugio.created_at) : new Date().toISOString();
+
+    const itemToSave: Record<string, unknown> = {
+      id,
+      created_at,
+      nombre: refugio.nombre,
+      direccion: refugio.direccion,
+      municipio: refugio.municipio,
+      estado_vzla: refugio.estado_vzla ?? refugio.estado,
+      pais: refugio.pais,
+      capacidad: refugio.capacidad,
+      descripcion: refugio.descripcion,
+      lat: refugio.lat ?? null,
+      lng: refugio.lng ?? null,
+      necesidades: refugio.necesidades || [],
+      contacto_nombre: refugio.contacto_nombre ?? refugio.contactoNombre,
+      contacto: refugio.contacto,
+      estado: refugio.estado_refugio ?? refugio.estado ?? 'activo',
+      personas,
+    };
+
+    const itemLocal = { ...refugio, personas } as BaseRecord
+
+    await guardarYPublicar('refugios', itemToSave, itemLocal, onToast);
     await reload();
+    const updated = { ...refugio, personas };
     setSel(updated);
-    setView("detalle"); setFotoPer(null);
+    setView('detalle');
+    setFotoPer(null);
     setFp({ nombre:"",tipo:"adulto",edad:"",descripcion:"",estado:"buscando_familia",contactoPropio:"" });
   };
 
@@ -2310,7 +2409,7 @@ function RefugiosSection({ online, onToast, dataVersion }: SectionProps) {
         <Field label="Teléfono propio o de familiar (si tiene)">
           <Input value={fp.contactoPropio} onChange={v=>setFp(x=>({...x,contactoPropio:v}))} placeholder="+58 414-000-0000" />
         </Field>
-        <Btn onClick={savePersona} full>{btnPublicar(online, "Registrar Persona")}</Btn>
+        <Btn onClick={savePersonaEnRefugio} full>{btnPublicar(online, "Registrar Persona")}</Btn>
       </Card>
     </div>
   );
