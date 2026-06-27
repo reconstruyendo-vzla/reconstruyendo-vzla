@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback, type CSSProperties, type ReactNode } from "react";
-import { supabase } from '@/lib/supabase'
 import {
   IDB,
   addQ,
@@ -16,6 +15,8 @@ import {
 import {
   enviarNotificacion,
   notificacionZonaCritica,
+  publicarEnServidor,
+  eliminarEnServidor,
   sincronizarTodo,
 } from '@/lib/offline-sync'
 import { hayInternetReal, iniciarVigilanciaConexion, suscribirConexion } from '@/lib/network'
@@ -106,7 +107,6 @@ async function publicarReporte(
     sinSenalMsg = MSG_SIN_SENAL,
     notify,
   } = options
-  const row = { id: item.id, record: item }
 
   try {
     await IDB.put(table, { ...item, _off: true })
@@ -133,13 +133,8 @@ async function publicarReporte(
   }
 
   try {
-    const result = await Promise.race([
-      supabase.from(table).upsert(row),
-      new Promise<{ error: { message: string } }>((resolve) =>
-        setTimeout(() => resolve({ error: { message: 'timeout' } }), 15000)
-      ),
-    ])
-    if (result.error) throw result.error
+    const ok = await publicarEnServidor(table, item, mode === 'insert' ? 'insert' : 'upsert')
+    if (!ok) throw new Error('servidor no aceptó el reporte')
     await IDB.put(table, { ...item, _off: false })
     onToast(okMsg, 'ok')
     return { ok: true, enRed: true }
@@ -154,8 +149,8 @@ async function publicarReporte(
       ...(notify ? { notify } : {}),
     })
     const sigueOnline = await hayInternetReal()
-    onToast(sigueOnline ? okMsg : sinSenalMsg, 'ok')
-    return { ok: true, enRed: sigueOnline }
+    onToast(sigueOnline ? 'Publicado aquí — reintentando subir a la red…' : sinSenalMsg, sigueOnline ? 'warn' : 'ok')
+    return { ok: true, enRed: false }
   }
 }
 
@@ -381,8 +376,8 @@ async function actualizarPersona(
   }
 
   try {
-    const { error } = await supabase.from('personas').upsert({ id, record: updated })
-    if (error) throw error
+    const ok = await publicarEnServidor('personas', updated, 'upsert')
+    if (!ok) throw new Error('update failed')
     await IDB.put('personas', { ...updated, _off: false })
     onToast(MSG_PUBLICADO, 'ok')
     return updated
@@ -390,7 +385,7 @@ async function actualizarPersona(
     console.error('actualizarPersona error:', e)
     addQ({ table: 'personas', action: 'update', id, patch })
     const sigueOnline = await hayInternetReal()
-    onToast(sigueOnline ? MSG_PUBLICADO : MSG_SIN_SENAL, 'ok')
+    onToast(sigueOnline ? 'Actualizado aquí — reintentando subir…' : MSG_SIN_SENAL, sigueOnline ? 'warn' : 'ok')
     return updated
   }
 }
@@ -419,8 +414,8 @@ async function eliminarRegistro(
   }
 
   try {
-    const { error } = await supabase.from(table).delete().eq('id', id)
-    if (error) throw error
+    const ok = await eliminarEnServidor(table, id)
+    if (!ok) throw new Error('delete failed')
     if (!silent) onToast(MSG_PUBLICADO, 'ok')
     return true
   } catch (e) {
@@ -2670,7 +2665,7 @@ export default function CrisisVE() {
   }, [sincronizar])
 
   useEffect(() => {
-    const ms = pending > 0 ? 8000 : 30000
+    const ms = pending > 0 ? 5000 : 10000
     const t = setInterval(() => sincronizar(true), ms)
     return () => clearInterval(t)
   }, [pending, sincronizar])

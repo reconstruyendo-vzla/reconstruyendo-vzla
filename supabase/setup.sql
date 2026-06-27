@@ -88,4 +88,19 @@ CREATE POLICY "refugios_insert" ON public.refugios FOR INSERT TO anon, authentic
 CREATE POLICY "aliados_insert" ON public.aliados FOR INSERT TO anon, authenticated WITH CHECK (true);
 
 CREATE POLICY "refugios_update" ON public.refugios FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "refugios_upsert" ON public.refugios FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+-- Actualizar y eliminar en todas las tablas
+CREATE POLICY "personas_update" ON public.personas FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "zonas_update" ON public.zonas FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "mascotas_update" ON public.mascotas FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "voluntarios_update" ON public.voluntarios FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "donaciones_update" ON public.donaciones FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "aliados_update" ON public.aliados FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+
+CREATE POLICY "personas_delete" ON public.personas FOR DELETE TO anon, authenticated USING (true);
+CREATE POLICY "zonas_delete" ON public.zonas FOR DELETE TO anon, authenticated USING (true);
+CREATE POLICY "mascotas_delete" ON public.mascotas FOR DELETE TO anon, authenticated USING (true);
+CREATE POLICY "voluntarios_delete" ON public.voluntarios FOR DELETE TO anon, authenticated USING (true);
+CREATE POLICY "donaciones_delete" ON public.donaciones FOR DELETE TO anon, authenticated USING (true);
+CREATE POLICY "refugios_delete" ON public.refugios FOR DELETE TO anon, authenticated USING (true);
+CREATE POLICY "aliados_delete" ON public.aliados FOR DELETE TO anon, authenticated USING (true);

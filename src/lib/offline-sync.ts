@@ -1,5 +1,4 @@
 import { hayInternetReal } from '@/lib/network'
-import { supabase } from '@/lib/supabase'
 import {
   IDB,
   addQ,
@@ -11,16 +10,9 @@ import {
   type QueueNotify,
   type SupabaseTable,
 } from '@/lib/idb-store'
+import { TABLAS_PUBLICAS } from '@/lib/supabase-admin'
 
-const SYNC_TABLES: SupabaseTable[] = [
-  'personas',
-  'zonas',
-  'mascotas',
-  'voluntarios',
-  'donaciones',
-  'refugios',
-  'aliados',
-]
+const SYNC_TABLES: SupabaseTable[] = TABLAS_PUBLICAS
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
   return Promise.race([
@@ -61,29 +53,79 @@ export async function enviarNotificacion(payload: QueueNotify): Promise<boolean>
   }
 }
 
+/** Sube un reporte a la red central — visible para todo el mundo */
+export async function publicarEnServidor(
+  table: SupabaseTable,
+  data: BaseRecord,
+  mode: 'insert' | 'upsert' = 'upsert'
+): Promise<boolean> {
+  const res = await withTimeout(
+    fetch('/api/publicar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ table, data, mode }),
+    }),
+    30000
+  )
+  if (!res?.ok) {
+    const err = await res?.json().catch(() => ({}))
+    console.error('publicarEnServidor', table, err)
+    return false
+  }
+  return true
+}
+
+export async function eliminarEnServidor(table: SupabaseTable, id: string): Promise<boolean> {
+  const res = await withTimeout(
+    fetch(`/api/publicar?table=${encodeURIComponent(table)}&id=${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
+    15000
+  )
+  return res?.ok ?? false
+}
+
+/** Sube reportes que quedaron solo en un dispositivo */
+async function subirHuerfanosLocales(serverIds: Map<SupabaseTable, Set<string>>): Promise<number> {
+  let subidos = 0
+  for (const table of SYNC_TABLES) {
+    const ids = serverIds.get(table) ?? new Set()
+    const localAll = await IDB.getAll(table)
+    for (const item of localAll) {
+      if (ids.has(String(item.id))) continue
+      const ok = await publicarEnServidor(table, item, 'upsert')
+      if (ok) {
+        await IDB.put(table, { ...item, _off: false })
+        subidos++
+      }
+    }
+  }
+  return subidos
+}
+
+/** Descarga toda la red desde el servidor */
 export async function syncFromSupabase(): Promise<number> {
   if (!(await hayInternetReal())) return 0
-  let count = 0
-  for (const table of SYNC_TABLES) {
-    const result = await withTimeout(
-      (async () =>
-        supabase
-          .from(table)
-          .select('id, record, created_at')
-          .order('created_at', { ascending: false })
-          .limit(500)
-      )(),
-      15000
-    )
-    if (!result || result.error) {
-      if (result?.error) console.error('syncFromSupabase', table, result.error.message)
-      continue
-    }
 
-    for (const row of result.data || []) {
+  const res = await withTimeout(fetch('/api/datos', { cache: 'no-store' }), 30000)
+  if (!res?.ok) {
+    console.error('syncFromSupabase: /api/datos', res?.status)
+    return 0
+  }
+
+  const payload = (await res.json()) as Record<string, Array<{ id: string; record: BaseRecord; created_at?: string }>>
+  let count = 0
+  const serverIds = new Map<SupabaseTable, Set<string>>()
+
+  for (const table of SYNC_TABLES) {
+    const rows = payload[table] || []
+    serverIds.set(table, new Set(rows.map((r) => r.id)))
+    const pendientesLocales = (await IDB.getAll(table)).filter((r) => r._off && !serverIds.get(table)!.has(String(r.id)))
+
+    for (const row of rows) {
       const record =
         row.record && typeof row.record === 'object' && !Array.isArray(row.record)
-          ? (row.record as BaseRecord)
+          ? row.record
           : ({} as BaseRecord)
       const item: BaseRecord = {
         ...record,
@@ -94,7 +136,13 @@ export async function syncFromSupabase(): Promise<number> {
       await IDB.put(table, item)
       count++
     }
+
+    for (const p of pendientesLocales) {
+      await IDB.put(table, p)
+    }
   }
+
+  await subirHuerfanosLocales(serverIds)
   return count
 }
 
@@ -102,8 +150,8 @@ async function publicarItem(item: QueueItem): Promise<void> {
   if (!isSupabaseTable(item.table)) return
 
   if (item.action === 'delete' && item.id) {
-    const { error } = await supabase.from(item.table).delete().eq('id', item.id)
-    if (error) throw error
+    const ok = await eliminarEnServidor(item.table, item.id)
+    if (!ok) throw new Error('delete failed')
     return
   }
 
@@ -112,8 +160,8 @@ async function publicarItem(item: QueueItem): Promise<void> {
     const base = local || (item.data as BaseRecord | undefined)
     if (!base) throw new Error('registro no encontrado')
     const updated = { ...base, ...item.patch }
-    const { error } = await supabase.from(item.table).upsert({ id: item.id, record: updated })
-    if (error) throw error
+    const ok = await publicarEnServidor(item.table, updated, 'upsert')
+    if (!ok) throw new Error('update failed')
     await IDB.put(item.table, { ...updated, _off: false })
     return
   }
@@ -121,12 +169,12 @@ async function publicarItem(item: QueueItem): Promise<void> {
   const data = item.data
   if (!data?.id) throw new Error('datos inválidos en cola')
 
-  const row = { id: data.id, record: data }
-  const { error } =
-    item.action === 'upsert' || item.action === 'update'
-      ? await supabase.from(item.table).upsert(row)
-      : await supabase.from(item.table).insert(row)
-  if (error) throw error
+  const ok = await publicarEnServidor(
+    item.table,
+    data,
+    item.action === 'insert' ? 'insert' : 'upsert'
+  )
+  if (!ok) throw new Error('insert failed')
   await IDB.put(item.table, { ...data, _off: false })
 }
 
