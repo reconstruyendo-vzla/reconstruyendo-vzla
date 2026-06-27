@@ -27,7 +27,6 @@ import {
 import { RedRescate } from '@/components/RedRescate'
 import { CompartirSinInternet } from '@/components/CompartirSinInternet'
 import { compressImage } from '@/lib/compress-image'
-import { decodificarRegistro, avisarLocal } from '@/lib/red-rescate'
 
 type ToastType = "ok" | "warn" | "green" | string
 type SectionProps = { online: boolean; onToast: (msg: string, type?: ToastType) => void; dataVersion: number }
@@ -261,7 +260,7 @@ function OfflineBanner({pending, syncing, online}:{pending:number; syncing?:bool
   if (online === false) {
     return (
       <div style={{background:"#FEF2F2",borderBottom:"2px solid #DC2626",padding:"10px 14px",fontSize:12,fontWeight:700,color:"#DC2626",textAlign:"center",lineHeight:1.45}}>
-        SIN INTERNET — Ve a Crisis → comparte alertas por SMS, QR o Bluetooth entre rescatistas
+        SIN INTERNET — Al guardar, envía un SMS a bomberos o coordinación
         {pending > 0 ? ` · ${pending} pendiente(s) de subir` : ""}
       </div>
     );
@@ -393,7 +392,6 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
   const [estF, setEstF] = useState("todos");
   const [saving, setSaving] = useState(false);
   const [compartir, setCompartir] = useState<BaseRecord | null>(null);
-  const [codigoImport, setCodigoImport] = useState('');
   const [f, setF] = useState({ nombre:"",edad:"",cat:"nino_sano",hospital:"",sala:"",ubicacion:"",pais:"Venezuela",descripcion:"",contactoNombre:"",contacto:"",lat:null as number | null,lng:null as number | null });
 
   const reload = useCallback(async () => setItems(await IDB.getAll("personas")), []);
@@ -467,7 +465,7 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
       }
       const ok = await publicarReporte("personas", item, online, onToast, {
         okMsg: "Persona publicada — visible para coordinadores",
-        offlineMsg: "✓ Niño/persona GUARDADO en tu teléfono. Compártelo por SMS o QR ahora.",
+        offlineMsg: "✓ Guardado en tu teléfono. Toca ENVIAR SMS para avisar a coordinación.",
       });
       if (!ok) return;
       await reload();
@@ -522,7 +520,7 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
           }
           <div style={{ marginTop: 14 }}>
             <Btn outline color={C.red} full onClick={() => setCompartir(sel)}>
-              📤 Compartir sin internet (SMS / QR)
+              📱 Enviar SMS a coordinación
             </Btn>
           </div>
         </Card>
@@ -600,39 +598,13 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
   const buscando=items.filter((p: BaseRecord)=>p.estado!=="encontrado").length;
   const enc=items.filter((p: BaseRecord)=>p.estado==="encontrado").length;
 
-  const importarPersona = async () => {
-    const decoded = decodificarRegistro(codigoImport.trim())
-    if (!decoded || decoded.table !== 'personas') {
-      onToast('Código inválido o no es una persona', 'warn')
-      return
-    }
-    const { item } = decoded
-    const existente = await IDB.get('personas', item.id)
-    if (!existente) await IDB.put('personas', { ...item, _off: true, _mesh: true })
-    avisarLocal('👤 Persona recibida', String(item.nombre))
-    onToast(`Persona importada: ${item.nombre}`, 'ok')
-    setCodigoImport('')
-    await reload()
-  }
-
   return (
     <div>
       {!online && (
-        <div style={{background:C.redLt,border:`1px solid ${C.red}`,borderRadius:12,padding:12,marginBottom:12,fontSize:12,lineHeight:1.5}}>
-          <strong style={{color:C.red}}>Sin internet:</strong> lo que guardes queda en este teléfono y se sube solo cuando haya red.
-          Comparte por SMS/QR al coordinador más cercano.
+        <div style={{background:C.redLt,border:`1px solid ${C.red}`,borderRadius:12,padding:12,marginBottom:12,fontSize:13,lineHeight:1.5}}>
+          <strong style={{color:C.red}}>Sin internet:</strong> guarda el reporte aquí y luego toca <strong>Enviar SMS</strong> para avisar a coordinación.
         </div>
       )}
-      <div style={{background:'white',borderRadius:12,padding:12,marginBottom:14,border:`1px solid ${C.border}`}}>
-        <div style={{fontSize:12,fontWeight:800,color:C.muted,marginBottom:8}}>¿Otro rescatista te envió un código?</div>
-        <input
-          value={codigoImport}
-          onChange={e => setCodigoImport(e.target.value)}
-          placeholder="Pega código RVZ1:…"
-          style={{width:'100%',padding:'10px 12px',borderRadius:8,border:`1.5px solid ${C.border}`,fontSize:12,boxSizing:'border-box',marginBottom:8,fontFamily:'monospace'}}
-        />
-        <Btn small onClick={importarPersona} color={C.green}>Importar persona</Btn>
-      </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
         <StatBox n={buscando} label="Buscando familia" color={C.amber} />
         <StatBox n={enc} label="Personas reunidas" color={C.green} />
@@ -896,7 +868,7 @@ function ZonasSection({ online, onToast, dataVersion }: SectionProps) {
 
     if (!online || !navigator.onLine) {
       addQ(queueItem)
-      onToast('Zona guardada ✓ Comparte la alerta ahora (SMS/QR)', 'ok')
+      onToast('Zona guardada ✓ Ahora envía el SMS', 'ok')
       setAlertaCompartir(item)
     } else {
       try {
@@ -916,7 +888,7 @@ function ZonasSection({ online, onToast, dataVersion }: SectionProps) {
       } catch (e: unknown) {
         console.error('saveZona error:', e)
         addQ(queueItem)
-        onToast('Zona guardada ✓ Comparte por SMS/QR mientras no hay red', 'ok')
+        onToast('Zona guardada ✓ Envía SMS a coordinación', 'ok')
         setAlertaCompartir(item)
       }
     }
@@ -989,7 +961,7 @@ function ZonasSection({ online, onToast, dataVersion }: SectionProps) {
           />
           <div style={{ marginTop: 14 }}>
             <Btn outline color={C.red} full onClick={() => setAlertaCompartir(sel)}>
-              🚨 Compartir alerta sin internet (SMS / QR)
+              📱 Enviar SMS a coordinación
             </Btn>
           </div>
         </Card>
@@ -1010,7 +982,7 @@ function ZonasSection({ online, onToast, dataVersion }: SectionProps) {
   if (view === "form") return (
     <div>
       <ProtocoloZonasBanner />
-      <RedRescate zonas={items} online={online} onToast={onToast} alertaRecienGuardada={alertaCompartir} onCerrarAlerta={() => setAlertaCompartir(null)} onImportada={reload} />
+      <RedRescate zonas={items} online={online} onToast={onToast} alertaRecienGuardada={alertaCompartir} onCerrarAlerta={() => setAlertaCompartir(null)} />
       <Back onClick={() => setView("list")} />
       <Card>
         <h3 style={{ margin: "0 0 4px", fontWeight: 800 }}>Reportar Zona de Crisis</h3>
@@ -1044,7 +1016,7 @@ function ZonasSection({ online, onToast, dataVersion }: SectionProps) {
   return (
     <div>
       <ProtocoloZonasBanner />
-      <RedRescate zonas={items} online={online} onToast={onToast} alertaRecienGuardada={alertaCompartir} onCerrarAlerta={() => setAlertaCompartir(null)} onImportada={reload} />
+      <RedRescate zonas={items} online={online} onToast={onToast} alertaRecienGuardada={alertaCompartir} onCerrarAlerta={() => setAlertaCompartir(null)} />
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 14 }}>
         {URGENCIAS.map(u => <StatBox key={u.id} n={items.filter((z: BaseRecord) => z.urgencia === u.id).length} label={u.statLabel} color={u.color} />)}
       </div>

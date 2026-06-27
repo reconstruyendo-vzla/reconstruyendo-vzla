@@ -192,10 +192,8 @@ export function textoCompartirRegistro(item: BaseRecord): string {
       item.ubicacion ? `Ubicación: ${item.ubicacion}` : '',
       item.hospital ? `Hospital: ${item.hospital}${item.sala ? ` — ${item.sala}` : ''}` : '',
       item.descripcion ? `Señas: ${item.descripcion}` : '',
-      item.lat != null && item.lng != null ? `GPS reporte: ${item.lat}, ${item.lng}` : '',
-      item.lat != null && item.lng != null ? `Maps: https://maps.google.com/?q=${item.lat},${item.lng}` : '',
-      `REPORTA: ${item.contactoNombre ?? ''} ${item.contacto ?? ''}`.trim(),
-      `Código: ${codificarRegistro(item)}`,
+      item.lat != null && item.lng != null ? `Ubicación: https://maps.google.com/?q=${item.lat},${item.lng}` : '',
+      `Contacto quien reporta: ${item.contactoNombre ?? ''} ${item.contacto ?? ''}`.trim(),
     ]
     return lines.filter(Boolean).join('\n')
   }
@@ -209,10 +207,8 @@ export function textoCompartirRegistro(item: BaseRecord): string {
     a.ay?.length ? `Necesita: ${a.ay.join(', ')}` : '',
     a.per?.length ? `Personal: ${a.per.join(', ')}` : '',
     a.ins?.length ? `Insumos: ${a.ins.join(', ')}` : '',
-    a.la != null && a.ln != null ? `GPS: ${a.la.toFixed(5)}, ${a.ln.toFixed(5)}` : '',
-    a.la != null && a.ln != null ? `Maps: https://maps.google.com/?q=${a.la},${a.ln}` : '',
-    `Coord: ${a.cn ? `${a.cn} ` : ''}${a.c}`,
-    `Código: ${codificarRegistro(item)}`,
+    a.la != null && a.ln != null ? `Ubicación: https://maps.google.com/?q=${a.la},${a.ln}` : '',
+    `Contacto: ${a.cn ? `${a.cn} ` : ''}${a.c}`,
   ]
   return lines.filter(Boolean).join('\n')
 }
