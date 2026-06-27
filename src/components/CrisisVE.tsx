@@ -170,6 +170,21 @@ const URGENCIAS = [
 
 const REMOTE_ESPECIALIDADES = ["Psicólogo/a", "Abogado/a", "Médico/a"];
 
+async function reportarSeguro(table: string, data: BaseRecord, online: boolean, onToast: SectionProps['onToast']): Promise<boolean> {
+  if (!online) return true
+  const response = await fetch('/api/reportar', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ table, data }),
+  })
+  const result = await response.json()
+  if (!response.ok) {
+    onToast(result.error || 'Error al guardar', 'warn')
+    return false
+  }
+  return true
+}
+
 // ============================================================
 // MICRO UI
 // ============================================================
@@ -330,6 +345,7 @@ function PersonasSection({ online, onToast }: SectionProps) {
   const save = async () => {
     if (!f.nombre || !f.contacto) { onToast("Nombre y contacto son obligatorios","warn"); return; }
     const item = { ...f, foto, estado:"buscando", id:uid(), ts:now(), _off:!online };
+    if (!(await reportarSeguro("personas", item, online, onToast))) return
     await IDB.put("personas", item);
     if (!online) addQ({ table:"personas", action:"insert", data:item });
     await reload(); setView("list"); setFoto(null);
@@ -593,6 +609,7 @@ function ZonasSection({ online, onToast }: SectionProps) {
   const save = async () => {
     if (!f.nombre || !f.contacto) { onToast("Nombre de zona y contacto obligatorios", "warn"); return; }
     const item = { ...f, estado_zona: "activa", id: uid(), ts: now(), _off: !online };
+    if (!(await reportarSeguro("zonas", item, online, onToast))) return
     await IDB.put("zonas", item);
     if (!online) addQ({ table: "zonas", action: "insert", data: item });
     await reload();
@@ -793,6 +810,7 @@ function MascotasSection({ online, onToast }: SectionProps) {
   const save = async () => {
     if (!f.ubicacion||!f.contacto) { onToast("Ubicación y contacto obligatorios","warn"); return; }
     const item = { ...f, foto, id:uid(), ts:now(), _off:!online };
+    if (!(await reportarSeguro("mascotas", item, online, onToast))) return
     await IDB.put("mascotas", item);
     if (!online) addQ({ table:"mascotas", action:"insert", data:item });
     await reload(); setView("list"); setFoto(null);
@@ -887,6 +905,7 @@ function VoluntariosSection({ online, onToast }: SectionProps) {
   const save = async () => {
     if (!f.nombre||!f.contacto||!f.especialidades.length) { onToast("Nombre, especialidad y contacto obligatorios","warn"); return; }
     const item = { ...f, pais:"Venezuela", remoto: puedeRemoto ? f.remoto : false, idiomas:f.idiomas.split(",").map(s=>s.trim()), estado:"disponible", id:uid(), ts:now(), _off:!online };
+    if (!(await reportarSeguro("voluntarios", item, online, onToast))) return
     await IDB.put("voluntarios", item);
     if (!online) addQ({ table:"voluntarios", action:"insert", data:item });
     await reload(); setView("list");
@@ -1068,6 +1087,7 @@ function DonacionesSection({ online, onToast }: SectionProps) {
     if (!fd.monto || !fd.nombre) { onToast("Monto y nombre son obligatorios", "warn"); return; }
     if (!fd.destinos.length) { onToast("Selecciona al menos un destino para tu donación", "warn"); return; }
     const item = { ...fd, comprobante: comp, verificado: false, id: uid(), ts: now(), _off: !online };
+    if (!(await reportarSeguro("donaciones", item, online, onToast))) return
     await IDB.put("donaciones", item);
     if (!online) addQ({ table: "donaciones", action: "insert", data: item });
     await reload(); setView("main"); setComp(null);
@@ -1479,6 +1499,7 @@ function RefugiosSection({ online, onToast }: SectionProps) {
       ...fr, foto, personas:[], id:uid(), ts:now(), _off:!online,
       estado:"activo",
     };
+    if (!(await reportarSeguro("refugios", item, online, onToast))) return
     await IDB.put("refugios", item);
     if (!online) addQ({ table:"refugios", action:"insert", data:item });
     await reload(); setView("list"); setFoto(null);
@@ -1493,6 +1514,7 @@ function RefugiosSection({ online, onToast }: SectionProps) {
     if (!refugio) return;
     const persona = { ...fp, foto:fotoPer, id:uid(), ts:now() };
     const updated = { ...refugio, personas:[...(refugio.personas||[]), persona] };
+    if (!(await reportarSeguro("refugios", updated, online, onToast))) return
     await IDB.put("refugios", updated);
     if (!online) addQ({ table:"refugios", action:"update", id:refugio.id, patch:{ personas: updated.personas } });
     await reload();
