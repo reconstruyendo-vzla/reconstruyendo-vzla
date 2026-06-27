@@ -6,11 +6,7 @@ const STATIC = [
   '/icon-512.png',
   '/favicon.ico',
   '/Reconstruyendo.svg',
-  'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css',
-  'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js',
 ];
-
-const TILE_CACHE = 'rvzla-tiles-v1';
 
 self.addEventListener('install', e => {
   e.waitUntil(
@@ -21,29 +17,12 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE && k !== TILE_CACHE).map(k => caches.delete(k)))
+      Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
 });
 
 self.addEventListener('fetch', e => {
-  const url = new URL(e.request.url);
-
-  if (url.hostname.includes('tile.openstreetmap.org')) {
-    e.respondWith(
-      caches.open(TILE_CACHE).then(cache =>
-        cache.match(e.request).then(cached => {
-          if (cached) return cached;
-          return fetch(e.request).then(res => {
-            cache.put(e.request, res.clone());
-            return res;
-          }).catch(() => cached);
-        })
-      )
-    );
-    return;
-  }
-
   e.respondWith(
     fetch(e.request)
       .then(res => {

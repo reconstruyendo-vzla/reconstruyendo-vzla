@@ -4,66 +4,16 @@ import { useState, useEffect, useRef, useCallback, type CSSProperties, type Reac
 import { supabase } from '@/lib/supabase'
 import { initOneSignal, notifyZonaCritica } from '@/lib/onesignal'
 
-// Reserved for cloud sync — import required by app architecture
-void supabase
-
-declare global {
-  interface Window {
-    L: LeafletStatic
-  }
-}
-
-type LeafletStatic = {
-  map: (el: HTMLElement, opts: Record<string, unknown>) => LeafletMap
-  tileLayer: (url: string, opts: Record<string, unknown>) => { addTo: (map: LeafletMap) => unknown }
-  divIcon: (opts: Record<string, unknown>) => unknown
-  marker: (latlng: [number, number], opts?: Record<string, unknown>) => LeafletMarker
-  control: (opts: { position: string }) => LeafletControl
-  DomUtil: { create: (tag: string) => HTMLElement }
-  DomEvent: { stopPropagation: (e: Event) => void }
-}
-
-type LeafletMap = {
-  setView: (latlng: [number, number], zoom: number) => void
-  on: (event: string, handler: (e: { latlng: { lat: number; lng: number } }) => void) => void
-  remove: () => void
-}
-
-type LeafletMarker = { addTo: (map: LeafletMap) => LeafletMarker; remove: () => void }
-type LeafletControl = { onAdd: (map: LeafletMap) => HTMLElement; addTo: (map: LeafletMap) => unknown }
-
 type ToastType = "ok" | "warn" | "green" | string
 type SectionProps = { online: boolean; onToast: (msg: string, type?: ToastType) => void }
 type StoreName = "personas" | "mascotas" | "zonas" | "voluntarios" | "donaciones" | "refugios" | "aliados" | "voluntarios_rec"
+type SupabaseTable = "personas" | "mascotas" | "zonas" | "voluntarios" | "donaciones" | "refugios"
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type BaseRecord = { id: string; ts?: string; _off?: boolean; [key: string]: any }
 type QueuePatch = Record<string, unknown>
 type QueueItem = { table: string; action: string; data?: BaseRecord; id?: string; patch?: QueuePatch }
 type Asistente = { nombre: string; contacto?: string; especialidad?: string; ts: string }
 type ToastState = { msg: string; type: ToastType } | null
-
-// ============================================================
-// LEAFLET (OpenStreetMap) - cargado dinámicamente
-// ============================================================
-let leafletLoaded = false;
-let L: LeafletStatic | null = null;
-
-async function loadLeaflet(): Promise<LeafletStatic | null> {
-  if (leafletLoaded) return L;
-  await new Promise((res) => {
-    const link = document.createElement("link");
-    link.rel = "stylesheet";
-    link.href = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css";
-    document.head.appendChild(link);
-    const script = document.createElement("script");
-    script.src = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js";
-    script.onload = res;
-    document.head.appendChild(script);
-  });
-  L = window.L;
-  leafletLoaded = true;
-  return L;
-}
 
 // ============================================================
 // OFFLINE STORAGE — IndexedDB
@@ -170,18 +120,33 @@ const URGENCIAS = [
 
 const REMOTE_ESPECIALIDADES = ["Psicólogo/a", "Abogado/a", "Médico/a"];
 
-async function reportarSeguro(table: string, data: BaseRecord, online: boolean, onToast: SectionProps['onToast']): Promise<boolean> {
-  if (!online) return true
-  const response = await fetch('/api/reportar', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ table, data }),
-  })
-  const result = await response.json()
-  if (!response.ok) {
-    onToast(result.error || 'Error al guardar', 'warn')
+async function guardarEnSupabase(
+  table: SupabaseTable,
+  item: BaseRecord,
+  onToast: SectionProps['onToast'],
+  mode: 'insert' | 'upsert' = 'insert'
+): Promise<boolean> {
+  const row = { id: item.id, record: item }
+  const request = mode === 'upsert'
+    ? supabase.from(table).upsert(row)
+    : supabase.from(table).insert(row)
+  const { error } = await request.select().single()
+
+  if (error) {
+    await IDB.put(table, item)
+    addQ({
+      table,
+      action: mode === 'upsert' ? 'update' : 'insert',
+      data: item,
+      id: mode === 'upsert' ? item.id : undefined,
+      patch: mode === 'upsert' ? item : undefined,
+    })
+    onToast('Guardado sin conexión', 'warn')
     return false
   }
+
+  await IDB.put(table, { ...item, _off: false })
+  onToast('Publicado correctamente', 'ok')
   return true
 }
 
@@ -227,103 +192,78 @@ function OfflineBanner({pending}:{pending:number}){
 }
 
 // ============================================================
-// MAPA COMPONENT (Leaflet + OpenStreetMap, funciona offline con tiles cacheados)
+// GPS
 // ============================================================
-function MapPicker({ lat, lng, onPin, readOnly = false, height = 280 }: { lat?: number | null; lng?: number | null; onPin?: (la: number, ln: number) => void; readOnly?: boolean; height?: number }) {
-  const mapRef = useRef<HTMLDivElement>(null);
-  const instanceRef = useRef<LeafletMap | null>(null);
-  const markerRef = useRef<LeafletMarker | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+function GPSButton({ lat, lng, onLocation }: { lat: number | null; lng: number | null; onLocation: (la: number, ln: number) => void }) {
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(false)
 
-  useEffect(() => {
-    let mounted = true;
-    loadLeaflet().then((Lf) => {
-      if (!mounted || !mapRef.current || instanceRef.current || !Lf) return;
-      setLoading(false);
-      const startLat = lat || 10.4806;
-      const startLng = lng || -66.9036;
-      const map = Lf.map(mapRef.current, { zoomControl: true, attributionControl: false });
-      instanceRef.current = map;
-
-      // OSM tiles — se cachean via service worker en producción
-      Lf.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-        attribution: "OpenStreetMap"
-      }).addTo(map);
-
-      map.setView([startLat, startLng], lat ? 15 : 10);
-
-      // Icono personalizado azul
-      const icon = Lf.divIcon({
-        html: `<div style="background:${C.primary};width:28px;height:28px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.35)"></div>`,
-        iconSize: [28,28], iconAnchor: [14,28], className:""
-      });
-
-      if (lat && lng) {
-        markerRef.current = Lf.marker([lat, lng], { icon }).addTo(map);
-      }
-
-      if (!readOnly) {
-        // Botón GPS
-        const gpsBtn = Lf.control({ position: "topleft" });
-        gpsBtn.onAdd = () => {
-          const btn = Lf.DomUtil.create("button");
-          btn.innerHTML = "";
-          btn.title = "Mi ubicación";
-          btn.style.cssText = `background:white;border:2px solid ${C.border};border-radius:8px;padding:6px 8px;font-size:16px;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.15)`;
-          btn.onclick = (e) => {
-            Lf.DomEvent.stopPropagation(e);
-            navigator.geolocation?.getCurrentPosition(pos => {
-              const { latitude, longitude } = pos.coords;
-              map.setView([latitude, longitude], 16);
-              placeMarker(latitude, longitude);
-            }, () => {});
-          };
-          return btn;
-        };
-        gpsBtn.addTo(map);
-
-        const placeMarker = (la: number, ln: number) => {
-          if (markerRef.current) markerRef.current.remove();
-          markerRef.current = Lf.marker([la, ln], { icon }).addTo(map);
-          onPin && onPin(la, ln);
-        };
-
-        map.on("click", (e) => placeMarker(e.latlng.lat, e.latlng.lng));
-      }
-    }).catch(() => { setLoading(false); setError(true); });
-
-    return () => {
-      mounted = false;
-      if (instanceRef.current) { instanceRef.current.remove(); instanceRef.current = null; }
-    };
-  }, []);
+  const getLocation = () => {
+    setLoading(true)
+    setError(false)
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        onLocation(pos.coords.latitude, pos.coords.longitude)
+        setLoading(false)
+      },
+      () => {
+        setError(true)
+        setLoading(false)
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    )
+  }
 
   return (
-    <div style={{ borderRadius: 12, overflow: "hidden", border: `1.5px solid ${C.border}`, position: "relative" }}>
-      {loading && <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", background: C.primaryLt, fontSize: 14, color: C.muted }}>Cargando mapa…</div>}
-      {error && <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", background: C.primaryLt, fontSize: 13, color: C.muted, flexDirection:"column", gap:8 }}><span style={{fontSize:32}}></span>Mapa no disponible sin internet.<br/>La ubicación GPS se guardó igual.</div>}
-      <div ref={mapRef} style={{ height: loading || error ? 0 : height, width: "100%" }} />
-      {!readOnly && !loading && !error && (
-        <div style={{ position: "absolute", bottom: 8, left: 0, right: 0, textAlign: "center", pointerEvents: "none" }}>
-          <span style={{ background: "rgba(255,255,255,0.92)", fontSize: 11, fontWeight: 600, color: C.muted, padding: "4px 10px", borderRadius: 20 }}>Toca el mapa para marcar la ubicación exacta · para usar tu GPS</span>
-        </div>
+    <div>
+      <button
+        onClick={getLocation}
+        disabled={loading}
+        style={{
+          width: '100%',
+          padding: '12px',
+          borderRadius: 9,
+          border: `1.5px solid ${C.border}`,
+          background: lat ? C.greenLt : 'white',
+          color: lat ? C.green : C.muted,
+          fontWeight: 700,
+          fontSize: 14,
+          cursor: loading ? 'wait' : 'pointer',
+          fontFamily: 'inherit'
+        }}
+      >
+        {loading ? 'Obteniendo ubicación...' : lat ? 'Ubicación obtenida' : 'Usar mi ubicación GPS'}
+      </button>
+      {lat != null && lng != null && (
+        <p style={{ fontSize: 11, color: C.green, marginTop: 4, fontWeight: 600 }}>
+          Coordenadas: {lat.toFixed(5)}, {lng.toFixed(5)}
+        </p>
+      )}
+      {error && (
+        <p style={{ fontSize: 11, color: C.amber, marginTop: 4 }}>
+          No se pudo obtener la ubicación. Verifica los permisos de GPS.
+        </p>
       )}
     </div>
-  );
+  )
 }
 
-// Mini mapa de solo lectura para tarjetas de detalle
-function MapView({ lat, lng, label }: { lat: number; lng: number; label?: string }) {
-  if (!lat || !lng) return null;
+function GPSCoordsLink({ lat, lng }: { lat: number; lng: number }) {
   return (
     <div style={{ marginBottom: 16 }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: "uppercase", marginBottom: 6 }}>Ubicación en mapa</div>
-      <MapPicker lat={lat} lng={lng} readOnly height={220} />
-      <div style={{ fontSize: 12, color: C.muted, marginTop: 6 }}>{lat.toFixed(5)}, {lng.toFixed(5)}{label ? ` — ${label}` : ""}</div>
+      <p style={{ margin: '0 0 6px', fontSize: 13, color: C.txt }}>
+        Coordenadas GPS: {lat.toFixed(5)}, {lng.toFixed(5)}
+      </p>
+      <a
+        href={`https://www.google.com/maps?q=${lat},${lng}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{ fontSize: 13, fontWeight: 700, color: C.primary }}
+      >
+        Ver en Google Maps
+      </a>
     </div>
-  );
+  )
 }
 
 // ============================================================
@@ -344,13 +284,10 @@ function PersonasSection({ online, onToast }: SectionProps) {
 
   const save = async () => {
     if (!f.nombre || !f.contacto) { onToast("Nombre y contacto son obligatorios","warn"); return; }
-    const item = { ...f, foto, estado:"buscando", id:uid(), ts:now(), _off:!online };
-    if (!(await reportarSeguro("personas", item, online, onToast))) return
-    await IDB.put("personas", item);
-    if (!online) addQ({ table:"personas", action:"insert", data:item });
+    const item = { ...f, foto, estado:"buscando", id:uid(), ts:now(), _off:true };
+    await guardarEnSupabase("personas", item, onToast);
     await reload(); setView("list"); setFoto(null);
     setF({ nombre:"",edad:"",cat:"nino_sano",hospital:"",sala:"",ubicacion:"",pais:"Venezuela",descripcion:"",contactoNombre:"",contacto:"",lat:null as number | null,lng:null as number | null });
-    onToast(online ? "Reporte publicado" : "Guardado sin internet — se publicará automáticamente", online?"ok":"warn");
   };
 
   const markFound = async (id: string) => {
@@ -383,7 +320,7 @@ function PersonasSection({ online, onToast }: SectionProps) {
           {sel.hospital && <p style={{margin:"0 0 3px",fontSize:13,color:C.sky,fontWeight:600}}>{sel.hospital}{sel.sala?` — ${sel.sala}`:""}</p>}
           {sel.ubicacion && <p style={{margin:"0 0 3px",fontSize:13,color:C.muted}}>{sel.ubicacion}, {sel.pais}</p>}
           {sel.descripcion && <div style={{background:C.bg,borderRadius:10,padding:12,margin:"12px 0",fontSize:13,lineHeight:1.6}}>{sel.descripcion}</div>}
-          {sel.lat && sel.lng && <MapView lat={sel.lat} lng={sel.lng} label={sel.ubicacion} />}
+          {sel.lat && sel.lng && <GPSCoordsLink lat={sel.lat} lng={sel.lng} />}
           <div style={{borderTop:`1px solid ${C.border}`,paddingTop:14,marginTop:6}}>
             {sel.contactoNombre && <p style={{margin:"0 0 2px",fontWeight:700,fontSize:14}}>{sel.contactoNombre}</p>}
             <p style={{margin:"0 0 14px",fontSize:15,fontWeight:800,color:C.primary}}>{sel.contacto}</p>
@@ -422,9 +359,8 @@ function PersonasSection({ online, onToast }: SectionProps) {
           </>}
           <Field label="Última ubicación (texto)"><Input value={f.ubicacion} onChange={v=>setF(x=>({...x,ubicacion:v}))} placeholder="Ej: Petare, Caracas" /></Field>
           <Field label="País"><Input value={f.pais} onChange={v=>setF(x=>({...x,pais:v}))} placeholder="Venezuela" /></Field>
-          <Field label="Pinear ubicación exacta en el mapa">
-            <MapPicker lat={f.lat} lng={f.lng} onPin={(la,ln)=>setF(x=>({...x,lat:la,lng:ln}))} />
-            {f.lat != null && f.lng != null && <p style={{fontSize:11,color:C.green,marginTop:4,fontWeight:600}}> Ubicación marcada: {f.lat.toFixed(4)}, {f.lng.toFixed(4)}</p>}
+          <Field label="Ubicación GPS">
+            <GPSButton lat={f.lat} lng={f.lng} onLocation={(la, ln) => setF(x => ({ ...x, lat: la, lng: ln }))} />
           </Field>
           <Field label="Descripción (ropa, señas, situación)"><Textarea value={f.descripcion} onChange={v=>setF(x=>({...x,descripcion:v}))} placeholder="Camisa azul, cabello corto…" /></Field>
           <Field label="Tu nombre (quien reporta)"><Input value={f.contactoNombre} onChange={v=>setF(x=>({...x,contactoNombre:v}))} placeholder="Ej: Carlos Martínez" /></Field>
@@ -670,17 +606,14 @@ function ZonasSection({ online, onToast }: SectionProps) {
 
   const save = async () => {
     if (!f.nombre || !f.contacto) { onToast("Nombre de zona y contacto obligatorios", "warn"); return; }
-    const item = { ...f, estado_zona: "activa", id: uid(), ts: now(), _off: !online };
-    if (!(await reportarSeguro("zonas", item, online, onToast))) return
-    await IDB.put("zonas", item);
-    if (!online) addQ({ table: "zonas", action: "insert", data: item });
+    const item = { ...f, estado_zona: "activa", id: uid(), ts: now(), _off: true };
+    const ok = await guardarEnSupabase("zonas", item, onToast);
     await reload();
-    if (f.urgencia === 'critica') {
+    if (ok && f.urgencia === 'critica') {
       await notifyZonaCritica(f.nombre, f.estado)
     }
     setView("list");
     setF({ nombre:"",estado:"",pais:"Venezuela",descripcion:"",lat:null as number | null,lng:null as number | null,insumos:[] as string[],ayuda:[] as string[],personal:[] as string[],contactoNombre:"",contacto:"",urgencia:"critica" });
-    onToast(online ? "Zona de crisis publicada" : "Guardada sin internet", online ? "ok" : "warn");
   };
 
   const handleAsistir = (data: Asistente) => {
@@ -727,7 +660,7 @@ function ZonasSection({ online, onToast }: SectionProps) {
           <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800 }}>{sel.nombre}</h2>
           <p style={{ margin: "0 0 12px", color: C.muted, fontSize: 13 }}>{[sel.estado, sel.pais].filter(Boolean).join(",")}</p>
           {sel.descripcion && <div style={{ background: C.bg, borderRadius: 10, padding: 12, marginBottom: 14, fontSize: 13, lineHeight: 1.6 }}>{sel.descripcion}</div>}
-          {sel.lat && sel.lng && <MapView lat={sel.lat} lng={sel.lng} label={sel.nombre} />}
+          {sel.lat && sel.lng && <GPSCoordsLink lat={sel.lat} lng={sel.lng} />}
           {sel.insumos?.length > 0 && <div style={{ marginBottom: 12 }}><div style={{ fontSize: 11, fontWeight: 700, color: C.muted, marginBottom: 6, textTransform: "uppercase" }}>Insumos necesarios</div><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{sel.insumos.map((i: string) => <Pill key={i} label={i} color={C.amber} bg={C.amberLt} />)}</div></div>}
           {sel.ayuda?.length > 0 && <div style={{ marginBottom: 12 }}><div style={{ fontSize: 11, fontWeight: 700, color: C.muted, marginBottom: 6, textTransform: "uppercase" }}>Tipo de ayuda</div><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{sel.ayuda.map((i: string) => <Pill key={i} label={i} color={C.primary} bg={C.primaryLt} />)}</div></div>}
           {sel.personal?.length > 0 && <div style={{ marginBottom: 12 }}><div style={{ fontSize: 11, fontWeight: 700, color: C.muted, marginBottom: 6, textTransform: "uppercase" }}>Personal solicitado</div><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{sel.personal.map((i: string) => <Pill key={i} label={i} color={C.teal} bg={C.tealLt} />)}</div></div>}
@@ -766,7 +699,7 @@ function ZonasSection({ online, onToast }: SectionProps) {
       <Back onClick={() => setView("list")} />
       <Card>
         <h3 style={{ margin: "0 0 4px", fontWeight: 800 }}>Reportar Zona de Crisis</h3>
-        <p style={{ margin: "0 0 14px", fontSize: 12, color: C.muted }}>Pinea la ubicación exacta para que los voluntarios lleguen sin errores</p>
+        <p style={{ margin: "0 0 14px", fontSize: 12, color: C.muted }}>Usa GPS para marcar la ubicación exacta y que los voluntarios lleguen sin errores</p>
         <Field label="Nivel de urgencia">
           <div style={{ display: "flex", gap: 6 }}>
             {URGENCIAS.map(u => <button key={u.id} onClick={() => setF(x => ({ ...x, urgencia: u.id }))} style={{ flex: 1, padding: "8px 4px", borderRadius: 8, border: `2px solid ${f.urgencia === u.id ? u.color : C.border}`, background: f.urgencia === u.id ? u.bg : "white", color: f.urgencia === u.id ? u.color : C.muted, fontWeight: 700, fontSize: 12, cursor: "pointer" }}>{u.label}</button>)}
@@ -775,9 +708,8 @@ function ZonasSection({ online, onToast }: SectionProps) {
         <Field label="Nombre / descripción del lugar *"><Input value={f.nombre} onChange={v => setF(x => ({ ...x, nombre: v }))} placeholder="Ej: Sector Las Flores, La Guaira" /></Field>
         <Field label="Ciudad / Estado"><Input value={f.estado} onChange={v => setF(x => ({ ...x, estado: v }))} placeholder="Ej: La Guaira, Vargas" /></Field>
         <Field label="País"><Input value={f.pais} onChange={v => setF(x => ({ ...x, pais: v }))} placeholder="Venezuela" /></Field>
-        <Field label="Pinear ubicación exacta (toca el mapa o usa GPS)">
-          <MapPicker lat={f.lat} lng={f.lng} onPin={(la, ln) => setF(x => ({ ...x, lat: la, lng: ln }))} />
-          {f.lat != null && f.lng != null && <p style={{ fontSize: 11, color: C.green, marginTop: 4, fontWeight: 600 }}> Pin colocado: {f.lat.toFixed(4)}, {f.lng.toFixed(4)}</p>}
+        <Field label="Ubicación GPS">
+          <GPSButton lat={f.lat} lng={f.lng} onLocation={(la, ln) => setF(x => ({ ...x, lat: la, lng: ln }))} />
         </Field>
         <Field label="Situación actual"><Textarea value={f.descripcion} onChange={v => setF(x => ({ ...x, descripcion: v }))} placeholder="Casas destruidas, personas sin agua, heridos…" /></Field>
         <Field label="Insumos que se necesitan"><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{INSUMOS.map((i: string) => <Chip key={i} label={i} active={f.insumos.includes(i)} onClick={() => tog("insumos", i)} />)}</div></Field>
@@ -874,13 +806,10 @@ function MascotasSection({ online, onToast }: SectionProps) {
 
   const save = async () => {
     if (!f.ubicacion||!f.contacto) { onToast("Ubicación y contacto obligatorios","warn"); return; }
-    const item = { ...f, foto, id:uid(), ts:now(), _off:!online };
-    if (!(await reportarSeguro("mascotas", item, online, onToast))) return
-    await IDB.put("mascotas", item);
-    if (!online) addQ({ table:"mascotas", action:"insert", data:item });
+    const item = { ...f, foto, id:uid(), ts:now(), _off:true };
+    await guardarEnSupabase("mascotas", item, onToast);
     await reload(); setView("list"); setFoto(null);
     setF({ especie:"Perro",nombre:"",color:"",cat:"sana",heridas:"",ubicacion:"",contacto:"",contactoNombre:"",lat:null as number | null,lng:null as number | null });
-    onToast(online?"Mascota reportada":"Guardada sin internet",online?"ok":"warn");
   };
 
   const filtered = catF==="todos"?items:items.filter((m: BaseRecord)=>m.cat===catF);
@@ -901,9 +830,8 @@ function MascotasSection({ online, onToast }: SectionProps) {
         <Field label="Color / características"><Input value={f.color} onChange={v=>setF(x=>({...x,color:v}))} placeholder="Ej: negro con manchas blancas" /></Field>
         {f.cat==="herida"&&<Field label="Descripción de heridas"><Textarea value={f.heridas} onChange={v=>setF(x=>({...x,heridas:v}))} rows={2} placeholder="Detalla las heridas visibles…" /></Field>}
         <Field label="Dónde está ahora (texto)"><Input value={f.ubicacion} onChange={v=>setF(x=>({...x,ubicacion:v}))} placeholder="Ej: Av. Libertador, Caracas" /></Field>
-        <Field label="Pinear en el mapa">
-          <MapPicker lat={f.lat} lng={f.lng} onPin={(la,ln)=>setF(x=>({...x,lat:la,lng:ln}))} />
-          {f.lat != null && f.lng != null && <p style={{fontSize:11,color:C.green,marginTop:4,fontWeight:600}}> Pin: {f.lat.toFixed(4)}, {f.lng.toFixed(4)}</p>}
+        <Field label="Ubicación GPS">
+          <GPSButton lat={f.lat} lng={f.lng} onLocation={(la, ln) => setF(x => ({ ...x, lat: la, lng: ln }))} />
         </Field>
         <Field label="Tu nombre"><Input value={f.contactoNombre} onChange={v=>setF(x=>({...x,contactoNombre:v}))} placeholder="Quien reporta" /></Field>
         <Field label="Contacto *"><Input value={f.contacto} onChange={v=>setF(x=>({...x,contacto:v}))} placeholder="+58 414-000-0000" /></Field>
@@ -969,13 +897,10 @@ function VoluntariosSection({ online, onToast }: SectionProps) {
 
   const save = async () => {
     if (!f.nombre||!f.contacto||!f.especialidades.length) { onToast("Nombre, especialidad y contacto obligatorios","warn"); return; }
-    const item = { ...f, pais:"Venezuela", remoto: puedeRemoto ? f.remoto : false, idiomas:f.idiomas.split(",").map(s=>s.trim()), estado:"disponible", id:uid(), ts:now(), _off:!online };
-    if (!(await reportarSeguro("voluntarios", item, online, onToast))) return
-    await IDB.put("voluntarios", item);
-    if (!online) addQ({ table:"voluntarios", action:"insert", data:item });
+    const item = { ...f, pais:"Venezuela", remoto: puedeRemoto ? f.remoto : false, idiomas:f.idiomas.split(",").map(s=>s.trim()), estado:"disponible", id:uid(), ts:now(), _off:true };
+    await guardarEnSupabase("voluntarios", item, onToast);
     await reload(); setView("list");
     setF({ nombre:"",especialidades:[] as string[],pais:"Venezuela",ciudad:"",remoto:false,idiomas:"Español",bio:"",contacto:"",lat:null as number | null,lng:null as number | null });
-    onToast(online?"Registrado como voluntario":"Guardado sin internet",online?"ok":"warn");
   };
 
   const filtered = items.filter((v: BaseRecord)=>{
@@ -1001,8 +926,8 @@ function VoluntariosSection({ online, onToast }: SectionProps) {
           </Field>
         )}
         <Field label="Idiomas"><Input value={f.idiomas} onChange={v=>setF(x=>({...x,idiomas:v}))} placeholder="Español, Inglés…" /></Field>
-        <Field label="Tu ubicación aproximada (opcional)">
-          <MapPicker lat={f.lat} lng={f.lng} onPin={(la,ln)=>setF(x=>({...x,lat:la,lng:ln}))} height={220} />
+        <Field label="Tu ubicación GPS (opcional)">
+          <GPSButton lat={f.lat} lng={f.lng} onLocation={(la, ln) => setF(x => ({ ...x, lat: la, lng: ln }))} />
         </Field>
         <Field label="Sobre ti (opcional)"><Textarea value={f.bio} onChange={v=>setF(x=>({...x,bio:v}))} placeholder="Experiencia, equipamiento disponible…" rows={2} /></Field>
         <Field label="Contacto *"><Input value={f.contacto} onChange={v=>setF(x=>({...x,contacto:v}))} placeholder="+58 414-000-0000 / @usuario / email" /></Field>
@@ -1026,7 +951,7 @@ function VoluntariosSection({ online, onToast }: SectionProps) {
         {sel.idiomas?.length>0&&<p style={{margin:"0 0 12px",color:C.muted,fontSize:12}}>{(Array.isArray(sel.idiomas)?sel.idiomas:[sel.idiomas]).join(",")}</p>}
         {sel.especialidades?.length>0&&<div style={{marginBottom:12}}><div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:6,textTransform:"uppercase"}}>Especialidades</div><div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{sel.especialidades.map((e: string)=><Pill key={e} label={e} color={C.teal} bg={C.tealLt} />)}</div></div>}
         {sel.bio&&<div style={{background:C.bg,borderRadius:10,padding:12,marginBottom:14,fontSize:13,lineHeight:1.6}}>{sel.bio}</div>}
-        {sel.lat&&sel.lng&&<MapView lat={sel.lat} lng={sel.lng} label={sel.ciudad} />}
+        {sel.lat&&sel.lng&&<GPSCoordsLink lat={sel.lat} lng={sel.lng} />}
         <div style={{borderTop:`1px solid ${C.border}`,paddingTop:14}}>
           <p style={{margin:0,fontSize:15,fontWeight:800,color:C.teal}}>{sel.contacto}</p>
         </div>
@@ -1201,13 +1126,10 @@ function DonacionesSection({ online, onToast }: SectionProps) {
 
   const saveDon = async () => {
     if (!fd.monto || !fd.nombre) { onToast("Monto y nombre son obligatorios", "warn"); return; }
-    const item = { ...fd, comprobante: comp, verificado: false, id: uid(), ts: now(), _off: !online };
-    if (!(await reportarSeguro("donaciones", item, online, onToast))) return
-    await IDB.put("donaciones", item);
-    if (!online) addQ({ table: "donaciones", action: "insert", data: item });
+    const item = { ...fd, comprobante: comp, verificado: false, id: uid(), ts: now(), _off: true };
+    await guardarEnSupabase("donaciones", item, onToast);
     await reload(); setView("main"); setComp(null);
     setFd({ monto:"", moneda:"USD", metodo:"Zelle", nombre:"", mensaje:"" });
-    onToast("¡Gracias! Tu donación fue registrada y se verificará pronto.", "ok");
   };
 
   const saveVoluntarioRec = async () => {
@@ -1505,15 +1427,12 @@ function RefugiosSection({ online, onToast }: SectionProps) {
   const saveRefugio = async () => {
     if (!fr.nombre || !fr.contacto) { onToast("Nombre del refugio y contacto son obligatorios","warn"); return; }
     const item = {
-      ...fr, foto, personas:[], id:uid(), ts:now(), _off:!online,
+      ...fr, foto, personas:[], id:uid(), ts:now(), _off:true,
       estado:"activo",
     };
-    if (!(await reportarSeguro("refugios", item, online, onToast))) return
-    await IDB.put("refugios", item);
-    if (!online) addQ({ table:"refugios", action:"insert", data:item });
+    await guardarEnSupabase("refugios", item, onToast);
     await reload(); setView("list"); setFoto(null);
     setFr({ nombre:"",direccion:"",municipio:"",estado:"",pais:"Venezuela",capacidad:"",descripcion:"",lat:null as number | null,lng:null as number | null,necesidades:[] as string[],contactoNombre:"",contacto:"" });
-    onToast(online ? "Refugio registrado" : "Guardado sin internet","ok");
   };
 
   // Guardar persona en refugio
@@ -1523,14 +1442,11 @@ function RefugiosSection({ online, onToast }: SectionProps) {
     if (!refugio) return;
     const persona = { ...fp, foto:fotoPer, id:uid(), ts:now() };
     const updated = { ...refugio, personas:[...(refugio.personas||[]), persona] };
-    if (!(await reportarSeguro("refugios", updated, online, onToast))) return
-    await IDB.put("refugios", updated);
-    if (!online) addQ({ table:"refugios", action:"update", id:refugio.id, patch:{ personas: updated.personas } });
+    await guardarEnSupabase("refugios", updated, onToast, 'upsert');
     await reload();
     setSel(updated);
     setView("detalle"); setFotoPer(null);
     setFp({ nombre:"",tipo:"adulto",edad:"",descripcion:"",estado:"buscando_familia",contactoPropio:"" });
-    onToast("Persona registrada en el refugio","ok");
   };
 
   // Marcar persona como reunida con familia
@@ -1625,9 +1541,8 @@ function RefugiosSection({ online, onToast }: SectionProps) {
         <Field label="Descripción del lugar">
           <Textarea value={fr.descripcion} onChange={v=>setFr(x=>({...x,descripcion:v}))} placeholder="Condiciones del lugar, servicios disponibles (agua, electricidad, baños)…" rows={2} />
         </Field>
-        <Field label="Ubicación exacta en el mapa">
-          <MapPicker lat={fr.lat} lng={fr.lng} onPin={(la,ln)=>setFr(x=>({...x,lat:la,lng:ln}))} />
-          {fr.lat != null && fr.lng != null && <p style={{fontSize:11,color:C.green,marginTop:4,fontWeight:600}}> Pin colocado: {fr.lat.toFixed(4)}, {fr.lng.toFixed(4)}</p>}
+        <Field label="Ubicación GPS">
+          <GPSButton lat={fr.lat} lng={fr.lng} onLocation={(la, ln) => setFr(x => ({ ...x, lat: la, lng: ln }))} />
         </Field>
         <Field label="¿Qué necesita este refugio?">
           <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
@@ -1674,7 +1589,7 @@ function RefugiosSection({ online, onToast }: SectionProps) {
               <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{sel.necesidades.map((n: string)=><Pill key={n} label={n} color={C.amber} bg={C.amberLt} />)}</div>
             </div>
           )}
-          {sel.lat&&sel.lng&&<MapView lat={sel.lat} lng={sel.lng} label={sel.nombre} />}
+          {sel.lat&&sel.lng&&<GPSCoordsLink lat={sel.lat} lng={sel.lng} />}
           <div style={{borderTop:`1px solid ${C.border}`,paddingTop:12,marginTop:8}}>
             {sel.contactoNombre&&<p style={{margin:"0 0 2px",fontWeight:700,fontSize:13}}>{sel.contactoNombre}</p>}
             <p style={{margin:0,fontSize:14,fontWeight:800,color:C.primary}}>{sel.contacto}</p>
