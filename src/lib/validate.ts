@@ -32,7 +32,9 @@ export function validateDonacion(data: any) {
   if (!data.monto || isNaN(parseFloat(data.monto))) errors.push('Monto inválido')
   if (parseFloat(data.monto) <= 0) errors.push('El monto debe ser mayor a 0')
   if (parseFloat(data.monto) > 100000) errors.push('Monto fuera de rango')
-  if (!data.destinos || data.destinos.length === 0) errors.push('Selecciona al menos un destino')
+  if (!data.destinos || !Array.isArray(data.destinos) || data.destinos.length === 0) errors.push('Selecciona al menos un destino')
+  if (data.destinos?.length > 40) errors.push('Demasiados destinos')
+  if (data.moneda && !['USD', 'Bs'].includes(data.moneda)) errors.push('Moneda inválida')
   return errors
 }
 
@@ -40,7 +42,10 @@ export function validateVoluntario(data: any) {
   const errors: string[] = []
   if (!data.nombre || data.nombre.trim().length < 2) errors.push('Nombre inválido')
   if (!data.contacto || data.contacto.trim().length < 6) errors.push('Contacto inválido')
-  if (!data.especialidades || data.especialidades.length === 0) errors.push('Selecciona al menos una especialidad')
+  if (!data.especialidades || !Array.isArray(data.especialidades) || data.especialidades.length === 0) {
+    errors.push('Selecciona al menos una especialidad')
+  }
+  if (data.especialidades?.length > 20) errors.push('Demasiadas especialidades')
   return errors
 }
 
@@ -78,7 +83,9 @@ export function sanitize(str: string): string {
   return str
     .trim()
     .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/<[^>]*>/g, '')
     .replace(/javascript:/gi, '')
-    .replace(/on\w+=/gi, '')
+    .replace(/data:/gi, '')
+    .replace(/on\w+\s*=/gi, '')
     .slice(0, 5000)
 }
