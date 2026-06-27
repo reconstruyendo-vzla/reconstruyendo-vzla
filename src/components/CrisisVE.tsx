@@ -18,12 +18,9 @@ import {
 } from '@/lib/offline-sync'
 import {
   activarNotificacionesPush,
-  asegurarAlertasEmergencia,
-  escucharPrimerToqueParaAlertas,
-  estaSuscritoPush,
   initOneSignalSDK,
   needsIOSInstallStep,
-  puedeAlertasEnNavegador,
+  permisoNativoConcedido,
 } from '@/lib/onesignal-client'
 
 type ToastType = "ok" | "warn" | "green" | string
@@ -91,21 +88,10 @@ async function publicarReporte(
 ): Promise<boolean> {
   const { mode = 'insert', okMsg = 'Publicado correctamente' } = options
   const row = { id: item.id, record: item }
-  try {
-    if (online) {
-      const req = mode === 'upsert'
-        ? supabase.from(table).upsert(row)
-        : supabase.from(table).insert(row)
-      const { error } = await req
-      if (error) throw error
-      await IDB.put(table, { ...item, _off: false })
-      onToast(okMsg, 'ok')
-      return true
-    }
-    throw new Error('offline')
-  } catch (e: unknown) {
-    console.error('publicarReporte error:', e)
-    await IDB.put(table, { ...item, _off: true })
+
+  await IDB.put(table, { ...item, _off: true })
+
+  if (!online || !navigator.onLine) {
     addQ({
       table,
       action: mode === 'upsert' ? 'update' : 'insert',
@@ -113,8 +99,35 @@ async function publicarReporte(
       id: mode === 'upsert' ? item.id : undefined,
       patch: mode === 'upsert' ? item : undefined,
     })
-    onToast(online ? 'Error al publicar — guardado localmente' : 'Sin conexión — guardado localmente', 'warn')
-    return false
+    onToast('Guardado ✓ Se publicará al reconectar', 'ok')
+    return true
+  }
+
+  try {
+    const req = mode === 'upsert'
+      ? supabase.from(table).upsert(row)
+      : supabase.from(table).insert(row)
+    const result = await Promise.race([
+      req,
+      new Promise<{ error: { message: string } }>((resolve) =>
+        setTimeout(() => resolve({ error: { message: 'timeout' } }), 12000)
+      ),
+    ])
+    if (result.error) throw result.error
+    await IDB.put(table, { ...item, _off: false })
+    onToast(okMsg, 'ok')
+    return true
+  } catch (e: unknown) {
+    console.error('publicarReporte error:', e)
+    addQ({
+      table,
+      action: mode === 'upsert' ? 'update' : 'insert',
+      data: item,
+      id: mode === 'upsert' ? item.id : undefined,
+      patch: mode === 'upsert' ? item : undefined,
+    })
+    onToast('Guardado ✓ Se sincronizará en breve', 'ok')
+    return true
   }
 }
 
@@ -155,45 +168,37 @@ function PhotoUpload({preview,onFile,label="Subir foto"}:{preview:string|null;on
 }
 
 function NotificacionesBanner({ onToast }: { onToast: (msg: string, type?: ToastType) => void }) {
-  const [estado, setEstado] = useState<'loading' | 'ios-install' | 'off' | 'on'>('loading')
+  const [estado, setEstado] = useState<'ios-install' | 'off' | 'on'>(() => {
+    if (typeof window !== 'undefined' && needsIOSInstallStep()) return 'ios-install'
+    if (permisoNativoConcedido()) return 'on'
+    return 'off'
+  })
   const [activando, setActivando] = useState(false)
 
-  const revisar = useCallback(async () => {
-    if (needsIOSInstallStep()) {
-      setEstado('ios-install')
-      return
-    }
-    const sub = await estaSuscritoPush()
-    setEstado(sub ? 'on' : 'off')
-  }, [])
-
-  useEffect(() => {
-    revisar()
-    const t = setInterval(revisar, 4000)
-    return () => clearInterval(t)
-  }, [revisar])
-
   const activar = async () => {
+    if (activando) return
     setActivando(true)
+    const liberar = setTimeout(() => setActivando(false), 6000)
+
     try {
       const r = await activarNotificacionesPush()
-      if (r === 'ok') {
+      if (r === 'ok' || permisoNativoConcedido()) {
         setEstado('on')
-        onToast('Listo — recibirás alertas de emergencia al instante', 'ok')
+        onToast('Alertas activadas — recibirás zonas críticas al instante', 'ok')
       } else if (r === 'ios-install') {
         setEstado('ios-install')
       } else if (r === 'denied') {
-        onToast('Toca el candado en la barra del navegador → Permitir notificaciones', 'warn')
+        onToast('Permiso denegado. En Chrome: candado → Notificaciones → Permitir', 'warn')
       } else {
-        onToast('Usa Chrome en Android o un navegador compatible', 'warn')
+        onToast('Usa Chrome en Android para recibir alertas', 'warn')
       }
     } finally {
+      clearTimeout(liberar)
       setActivando(false)
-      revisar()
     }
   }
 
-  if (estado === 'loading' || estado === 'on') return null
+  if (estado === 'on') return null
 
   return (
     <div style={{
@@ -219,7 +224,7 @@ function NotificacionesBanner({ onToast }: { onToast: (msg: string, type?: Toast
             EMERGENCIA — Activa alertas de zonas críticas
           </div>
           <div style={{ fontSize: 12, opacity: 0.95, marginBottom: 10, lineHeight: 1.45 }}>
-            <strong>No descargues nada.</strong> Solo toca el botón y acepta en el navegador (Chrome, Android, etc.).
+            Toca el botón y acepta en el popup. Funciona en Chrome/Android sin descargar nada.
           </div>
           <Btn
             onClick={activar}
@@ -228,7 +233,7 @@ function NotificacionesBanner({ onToast }: { onToast: (msg: string, type?: Toast
             color="#FFFFFF"
             style={{ color: '#DC2626', fontWeight: 900, fontSize: 15 }}
           >
-            {activando ? 'Espera…' : 'PERMITIR ALERTAS AHORA'}
+            {activando ? 'Acepta en el popup ↑' : 'PERMITIR ALERTAS AHORA'}
           </Btn>
         </>
       )}
@@ -698,29 +703,38 @@ function ZonasSection({ online, onToast, dataVersion }: SectionProps) {
       estado_zona: 'activa',
       created_at: new Date().toISOString(),
     }
-    try {
-      if (online) {
-        const { error } = await supabase.from('zonas').insert({ id: item.id, record: item })
+    const row = { id: item.id, record: item }
+    await IDB.put('zonas', { ...item, _off: true })
+
+    const queueItem: QueueItem = {
+      table: 'zonas',
+      action: 'insert',
+      data: item,
+      ...(f.urgencia === 'critica' ? { notify: notificacionZonaCritica(item) } : {}),
+    }
+
+    if (!online || !navigator.onLine) {
+      addQ(queueItem)
+      onToast('Zona guardada ✓ Se publicará al reconectar', 'ok')
+    } else {
+      try {
+        const { error } = await Promise.race([
+          supabase.from('zonas').insert(row),
+          new Promise<{ error: { message: string } }>((resolve) =>
+            setTimeout(() => resolve({ error: { message: 'timeout' } }), 12000)
+          ),
+        ])
         if (error) throw error
         await IDB.put('zonas', { ...item, _off: false })
         onToast('Zona publicada correctamente', 'ok')
         if (f.urgencia === 'critica') {
-          await enviarNotificacion(notificacionZonaCritica(item))
+          enviarNotificacion(notificacionZonaCritica(item)).catch(() => {})
         }
-      } else {
-        throw new Error('offline')
+      } catch (e: unknown) {
+        console.error('saveZona error:', e)
+        addQ(queueItem)
+        onToast('Zona guardada ✓ Se sincronizará en breve', 'ok')
       }
-    } catch (e: unknown) {
-      console.error('saveZona error:', e)
-      await IDB.put('zonas', { ...item, _off: true })
-      const queueItem: QueueItem = {
-        table: 'zonas',
-        action: 'insert',
-        data: item,
-        ...(f.urgencia === 'critica' ? { notify: notificacionZonaCritica(item) } : {}),
-      }
-      addQ(queueItem)
-      onToast(online ? 'Error al publicar — guardado localmente' : 'Sin conexión — guardado localmente', 'warn')
     }
     await reload()
     setView('list')
@@ -1978,17 +1992,12 @@ export default function CrisisVE() {
 
   useEffect(() => {
     initOneSignalSDK()
-    const cleanup = escucharPrimerToqueParaAlertas()
-    if (puedeAlertasEnNavegador()) {
-      const t = setTimeout(() => { asegurarAlertasEmergencia() }, 2500)
-      return () => { clearTimeout(t); cleanup() }
-    }
-    return cleanup
   }, []);
 
   useEffect(() => {
     setPending(getQ().length)
-    sincronizar(true)
+    setDataVersion((v) => v + 1)
+    if (navigator.onLine) sincronizar(true)
     const onQueue = () => setPending(getQ().length)
     window.addEventListener('crisisve-queue', onQueue)
     return () => window.removeEventListener('crisisve-queue', onQueue)

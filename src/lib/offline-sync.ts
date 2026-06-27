@@ -21,28 +21,39 @@ const SYNC_TABLES: SupabaseTable[] = [
   'aliados',
 ]
 
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return Promise.race([
+    promise,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
+  ])
+}
+
 export function notificacionZonaCritica(item: BaseRecord): QueueNotify {
   const estado = String(item.estado_vzla ?? item.estado ?? '')
   const pais = String(item.pais ?? 'Venezuela')
   return {
-    title: 'Zona Crítica Reportada',
-    message: `${item.nombre} en ${estado}, ${pais} necesita ayuda urgente`,
+    title: '🚨 Zona Crítica',
+    message: `${item.nombre} en ${estado}, ${pais} — ayuda urgente`,
     url: 'https://reconstruyendovzla.com',
   }
 }
 
 export async function enviarNotificacion(payload: QueueNotify): Promise<boolean> {
+  if (!navigator.onLine) return false
   try {
-    const res = await fetch('/api/notify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title: payload.title,
-        message: payload.message,
-        url: payload.url ?? 'https://reconstruyendovzla.com',
+    const res = await withTimeout(
+      fetch('/api/notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: payload.title,
+          message: payload.message,
+          url: payload.url ?? 'https://reconstruyendovzla.com',
+        }),
       }),
-    })
-    return res.ok
+      15000
+    )
+    return res?.ok ?? false
   } catch (e) {
     console.error('enviarNotificacion error:', e)
     return false
@@ -50,20 +61,25 @@ export async function enviarNotificacion(payload: QueueNotify): Promise<boolean>
 }
 
 export async function syncFromSupabase(): Promise<number> {
+  if (!navigator.onLine) return 0
   let count = 0
   for (const table of SYNC_TABLES) {
-    const { data, error } = await supabase
-      .from(table)
-      .select('id, record, created_at')
-      .order('created_at', { ascending: false })
-      .limit(500)
-
-    if (error) {
-      console.error('syncFromSupabase', table, error.message)
+    const result = await withTimeout(
+      (async () =>
+        supabase
+          .from(table)
+          .select('id, record, created_at')
+          .order('created_at', { ascending: false })
+          .limit(500)
+      )(),
+      15000
+    )
+    if (!result || result.error) {
+      if (result?.error) console.error('syncFromSupabase', table, result.error.message)
       continue
     }
 
-    for (const row of data || []) {
+    for (const row of result.data || []) {
       const record =
         row.record && typeof row.record === 'object' && !Array.isArray(row.record)
           ? (row.record as BaseRecord)
@@ -108,6 +124,8 @@ async function publicarItem(item: QueueItem): Promise<void> {
 }
 
 export async function processQueue(): Promise<{ synced: number; failed: number; notified: number }> {
+  if (!navigator.onLine) return { synced: 0, failed: getQ().length, notified: 0 }
+
   const queue = getQ()
   if (!queue.length) return { synced: 0, failed: 0, notified: 0 }
 
@@ -143,6 +161,9 @@ export async function sincronizarTodo(): Promise<{
   failed: number
   notified: number
 }> {
+  if (!navigator.onLine) {
+    return { downloaded: 0, synced: 0, failed: getQ().length, notified: 0 }
+  }
   const { synced, failed, notified } = await processQueue()
   const downloaded = await syncFromSupabase()
   return { downloaded, synced, failed, notified }

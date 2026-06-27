@@ -9,7 +9,6 @@ export type OneSignalSDK = {
     PushSubscription: {
       optedIn: boolean
       id?: string | null
-      addEventListener: (event: string, cb: (e: { current: { optedIn?: boolean; id?: string } }) => void) => void
     }
   }
   Slidedown: {
@@ -19,6 +18,14 @@ export type OneSignalSDK = {
 
 const ONESIGNAL_WORKER = 'push/onesignal/OneSignalSDKWorker.js'
 const ONESIGNAL_SCOPE = '/push/onesignal/'
+const PUSH_OK_KEY = 'rvzla_push_ok'
+
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
+  ])
+}
 
 export function isIOSDevice(): boolean {
   if (typeof navigator === 'undefined') return false
@@ -34,7 +41,6 @@ export function isStandalonePWA(): boolean {
   return window.matchMedia('(display-mode: standalone)').matches || nav.standalone === true
 }
 
-/** iOS Safari en pestaña normal: Apple exige añadir a inicio. Android/Chrome NO necesitan instalar. */
 export function needsIOSInstallStep(): boolean {
   return isIOSDevice() && !isStandalonePWA()
 }
@@ -43,113 +49,106 @@ export function puedeAlertasEnNavegador(): boolean {
   return !needsIOSInstallStep()
 }
 
-export function registerOneSignalDeferred(cb: (OneSignal: OneSignalSDK) => void | Promise<void>) {
-  if (typeof window === 'undefined') return
-  window.OneSignalDeferred = window.OneSignalDeferred || []
-  window.OneSignalDeferred.push(cb)
+export function permisoNativoConcedido(): boolean {
+  if (typeof window === 'undefined' || !('Notification' in window)) return false
+  return Notification.permission === 'granted' || localStorage.getItem(PUSH_OK_KEY) === '1'
 }
 
 export function initOneSignalSDK(): void {
-  registerOneSignalDeferred(async (OneSignal) => {
+  if (typeof window === 'undefined') return
+  window.OneSignalDeferred = window.OneSignalDeferred || []
+  window.OneSignalDeferred.push(async (OneSignal) => {
     const appId = process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID
-    if (!appId) {
-      console.error('OneSignal: falta NEXT_PUBLIC_ONESIGNAL_APP_ID')
-      return
-    }
+    if (!appId) return
 
-    const enNavegador = puedeAlertasEnNavegador()
-
-    await OneSignal.init({
-      appId,
-      allowLocalhostAsSecureOrigin: true,
-      notifyButton: { enable: false },
-      serviceWorkerPath: ONESIGNAL_WORKER,
-      serviceWorkerUpdaterPath: 'push/onesignal/OneSignalSDKUpdaterWorker.js',
-      serviceWorkerParam: { scope: ONESIGNAL_SCOPE },
-      promptOptions: {
-        slidedown: {
-          prompts: [
-            {
+    try {
+      await OneSignal.init({
+        appId,
+        allowLocalhostAsSecureOrigin: true,
+        notifyButton: { enable: false },
+        serviceWorkerPath: ONESIGNAL_WORKER,
+        serviceWorkerUpdaterPath: 'push/onesignal/OneSignalSDKUpdaterWorker.js',
+        serviceWorkerParam: { scope: ONESIGNAL_SCOPE },
+        promptOptions: {
+          slidedown: {
+            prompts: [{
               type: 'push',
-              autoPrompt: enNavegador,
+              autoPrompt: false,
               text: {
-                actionMessage: 'EMERGENCIA: ¿Recibir alertas de zonas críticas en Venezuela?',
-                acceptButton: 'Sí, activar',
+                actionMessage: '¿Recibir alertas de zonas críticas?',
+                acceptButton: 'Sí',
                 cancelButton: 'No',
               },
-              delay: { pageViews: 1, timeDelay: 1 },
-            },
-          ],
+            }],
+          },
         },
-      },
-    })
+      })
+      if (permisoNativoConcedido()) {
+        OneSignal.Notifications.requestPermission().catch(() => {})
+      }
+    } catch (e) {
+      console.error('OneSignal init:', e)
+    }
   })
 }
 
-export async function waitForOneSignal(maxMs = 12000): Promise<OneSignalSDK | null> {
-  if (typeof window === 'undefined') return null
-  const start = Date.now()
-  while (Date.now() - start < maxMs) {
-    const os = window.OneSignal
-    if (os) return os
-    await new Promise((r) => setTimeout(r, 200))
-  }
-  return window.OneSignal ?? null
-}
-
 export async function estaSuscritoPush(): Promise<boolean> {
-  const OneSignal = await waitForOneSignal(6000)
-  if (!OneSignal) return false
+  if (permisoNativoConcedido()) return true
+  const OS = await withTimeout(waitForOneSignal(4000), 4000, null)
+  if (!OS) return false
   try {
-    return Boolean(OneSignal.User.PushSubscription.optedIn)
+    return Boolean(OS.User.PushSubscription.optedIn)
   } catch {
     return false
   }
 }
 
+async function waitForOneSignal(maxMs: number): Promise<OneSignalSDK | null> {
+  if (typeof window === 'undefined') return null
+  const start = Date.now()
+  while (Date.now() - start < maxMs) {
+    if (window.OneSignal) return window.OneSignal
+    await new Promise((r) => setTimeout(r, 150))
+  }
+  return window.OneSignal ?? null
+}
+
+/** Permiso nativo del navegador — funciona en Chrome/Android sin esperar OneSignal */
 export async function activarNotificacionesPush(): Promise<'ok' | 'denied' | 'unsupported' | 'ios-install'> {
   if (needsIOSInstallStep()) return 'ios-install'
 
-  const OneSignal = await waitForOneSignal()
-  if (!OneSignal) return 'unsupported'
+  if (typeof window === 'undefined' || !('Notification' in window)) return 'unsupported'
 
-  const supported = await OneSignal.Notifications.isPushSupported()
-  if (!supported) return 'unsupported'
+  if (Notification.permission === 'granted') {
+    localStorage.setItem(PUSH_OK_KEY, '1')
+    vincularOneSignalEnFondo()
+    return 'ok'
+  }
 
-  const granted = await OneSignal.Notifications.requestPermission()
-  if (granted) return 'ok'
+  if (Notification.permission === 'denied') return 'denied'
 
   try {
-    await OneSignal.Slidedown.promptPush({ force: true })
-    const retry = await OneSignal.Notifications.requestPermission()
-    return retry ? 'ok' : 'denied'
+    const perm = await withTimeout(
+      Notification.requestPermission(),
+      8000,
+      'denied' as NotificationPermission
+    )
+    if (perm === 'granted') {
+      localStorage.setItem(PUSH_OK_KEY, '1')
+      vincularOneSignalEnFondo()
+      return 'ok'
+    }
+    return 'denied'
   } catch {
     return 'denied'
   }
 }
 
-/** Pide permiso si aún no está suscrito — para emergencias al primer toque */
-export async function asegurarAlertasEmergencia(): Promise<boolean> {
-  if (await estaSuscritoPush()) return true
-  if (!puedeAlertasEnNavegador()) return false
-  return (await activarNotificacionesPush()) === 'ok'
-}
-
-export function escucharPrimerToqueParaAlertas(onActivado?: () => void) {
-  if (typeof document === 'undefined' || needsIOSInstallStep()) return () => {}
-
-  const handler = async () => {
-    const ok = await asegurarAlertasEmergencia()
-    if (ok) onActivado?.()
-  }
-
-  document.addEventListener('click', handler, { once: true, capture: true })
-  document.addEventListener('touchend', handler, { once: true, capture: true })
-
-  return () => {
-    document.removeEventListener('click', handler, { capture: true })
-    document.removeEventListener('touchend', handler, { capture: true })
-  }
+function vincularOneSignalEnFondo() {
+  waitForOneSignal(20000).then((OS) => {
+    if (!OS) return
+    OS.Notifications.requestPermission().catch(() => {})
+  })
 }
 
 declare global {
