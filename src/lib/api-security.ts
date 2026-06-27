@@ -102,7 +102,6 @@ export function buildReportRecord(table: ReportTable, data: Record<string, unkno
         metodo: asString(data.metodo, 40),
         nombre: asString(data.nombre, 200),
         mensaje: asString(data.mensaje, 1000),
-        destinos: asStringArray(data.destinos, 40, 120),
         comprobante: asString(data.comprobante, 500000),
         verificado: false,
       }

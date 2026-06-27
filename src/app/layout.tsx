@@ -5,11 +5,15 @@ export const metadata: Metadata = {
   title: 'Reconstruyendo Vzla',
   description: 'Sistema de coordinación de emergencias Venezuela',
   manifest: '/manifest.json',
-  themeColor: '#2563EB',
+  themeColor: '#ffffff',
+  icons: {
+    icon: [{ url: '/favicon.ico' }, { url: '/icon-192.png', sizes: '192x192', type: 'image/png' }],
+    apple: [{ url: '/apple-icon.png', sizes: '180x180', type: 'image/png' }],
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
-    title: 'RVzla',
+    title: 'Reconstruyendo Vzla',
   },
 }
 
@@ -20,12 +24,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-        <meta name="apple-mobile-web-app-title" content="RVzla" />
-        <link rel="apple-touch-icon" href="/icon-192.png" />
+        <meta name="apple-mobile-web-app-title" content="Reconstruyendo Vzla" />
         <link rel="manifest" href="/manifest.json" />
         <script dangerouslySetInnerHTML={{
           __html: `
-            if ('serviceWoker' in navigator) {
+            if ('serviceWorker' in navigator) {
               window.addEventListener('load', () => {
                 navigator.serviceWorker.register('/sw.js');
               });

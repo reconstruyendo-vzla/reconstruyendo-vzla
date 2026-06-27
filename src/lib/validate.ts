@@ -32,8 +32,6 @@ export function validateDonacion(data: any) {
   if (!data.monto || isNaN(parseFloat(data.monto))) errors.push('Monto inválido')
   if (parseFloat(data.monto) <= 0) errors.push('El monto debe ser mayor a 0')
   if (parseFloat(data.monto) > 100000) errors.push('Monto fuera de rango')
-  if (!data.destinos || !Array.isArray(data.destinos) || data.destinos.length === 0) errors.push('Selecciona al menos un destino')
-  if (data.destinos?.length > 40) errors.push('Demasiados destinos')
   if (data.moneda && !['USD', 'Bs'].includes(data.moneda)) errors.push('Moneda inválida')
   return errors
 }
