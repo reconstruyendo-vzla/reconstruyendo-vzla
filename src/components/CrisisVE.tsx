@@ -149,8 +149,8 @@ async function publicarReporte(
       ...(notify ? { notify } : {}),
     })
     const sigueOnline = await hayInternetReal()
-    onToast(sigueOnline ? 'Publicado aquí — reintentando subir a la red…' : sinSenalMsg, sigueOnline ? 'warn' : 'ok')
-    return { ok: true, enRed: false }
+    onToast(sigueOnline ? 'No se pudo publicar en la red — reintentando…' : sinSenalMsg, 'warn')
+    return { ok: false, enRed: false }
   }
 }
 

@@ -1,4 +1,5 @@
 import { hayInternetReal } from '@/lib/network'
+import { supabase } from '@/lib/supabase'
 import {
   IDB,
   addQ,
@@ -10,9 +11,16 @@ import {
   type QueueNotify,
   type SupabaseTable,
 } from '@/lib/idb-store'
-import { TABLAS_PUBLICAS } from '@/lib/supabase-admin'
 
-const SYNC_TABLES: SupabaseTable[] = TABLAS_PUBLICAS
+const SYNC_TABLES: SupabaseTable[] = [
+  'personas',
+  'zonas',
+  'mascotas',
+  'voluntarios',
+  'donaciones',
+  'refugios',
+  'aliados',
+]
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
   return Promise.race([
@@ -53,36 +61,39 @@ export async function enviarNotificacion(payload: QueueNotify): Promise<boolean>
   }
 }
 
-/** Sube un reporte a la red central — visible para todo el mundo */
+/** Sube un reporte a Supabase — visible en todos los dispositivos */
 export async function publicarEnServidor(
   table: SupabaseTable,
   data: BaseRecord,
   mode: 'insert' | 'upsert' = 'upsert'
 ): Promise<boolean> {
-  const res = await withTimeout(
-    fetch('/api/publicar', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ table, data, mode }),
-    }),
-    30000
-  )
-  if (!res?.ok) {
-    const err = await res?.json().catch(() => ({}))
-    console.error('publicarEnServidor', table, err)
+  const row = { id: String(data.id), record: data }
+  const req =
+    mode === 'insert'
+      ? supabase.from(table).insert(row)
+      : supabase.from(table).upsert(row)
+
+  const result = await withTimeout(Promise.resolve(req), 30000)
+  if (!result?.error) return true
+
+  if (mode === 'insert') {
+    const retry = await withTimeout(Promise.resolve(supabase.from(table).upsert(row)), 30000)
+    if (!retry?.error) return true
+    console.error('publicarEnServidor', table, retry.error.message)
     return false
   }
-  return true
+
+  console.error('publicarEnServidor', table, result.error.message)
+  return false
 }
 
 export async function eliminarEnServidor(table: SupabaseTable, id: string): Promise<boolean> {
-  const res = await withTimeout(
-    fetch(`/api/publicar?table=${encodeURIComponent(table)}&id=${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-    }),
-    15000
-  )
-  return res?.ok ?? false
+  const result = await withTimeout(Promise.resolve(supabase.from(table).delete().eq('id', id)), 15000)
+  if (!result || result.error) {
+    console.error('eliminarEnServidor', table, result?.error?.message)
+    return false
+  }
+  return true
 }
 
 /** Sube reportes que quedaron solo en un dispositivo */
@@ -103,42 +114,45 @@ async function subirHuerfanosLocales(serverIds: Map<SupabaseTable, Set<string>>)
   return subidos
 }
 
-/** Descarga toda la red desde el servidor */
+/** Descarga toda la red desde Supabase */
 export async function syncFromSupabase(): Promise<number> {
   if (!(await hayInternetReal())) return 0
 
-  const res = await withTimeout(fetch('/api/datos', { cache: 'no-store' }), 30000)
-  if (!res?.ok) {
-    console.error('syncFromSupabase: /api/datos', res?.status)
-    return 0
-  }
-
-  const payload = (await res.json()) as Record<string, Array<{ id: string; record: BaseRecord; created_at?: string }>>
   let count = 0
   const serverIds = new Map<SupabaseTable, Set<string>>()
 
   for (const table of SYNC_TABLES) {
-    const rows = payload[table] || []
+    const result = await withTimeout(
+      Promise.resolve(
+        supabase
+          .from(table)
+          .select('id, record, created_at')
+          .order('created_at', { ascending: false })
+          .limit(1000)
+      ),
+      30000
+    )
+    if (!result || result.error) {
+      console.error('syncFromSupabase', table, result?.error?.message)
+      serverIds.set(table, new Set())
+      continue
+    }
+
+    const rows = result.data || []
     serverIds.set(table, new Set(rows.map((r) => r.id)))
-    const pendientesLocales = (await IDB.getAll(table)).filter((r) => r._off && !serverIds.get(table)!.has(String(r.id)))
 
     for (const row of rows) {
       const record =
         row.record && typeof row.record === 'object' && !Array.isArray(row.record)
-          ? row.record
+          ? (row.record as BaseRecord)
           : ({} as BaseRecord)
-      const item: BaseRecord = {
+      await IDB.put(table, {
         ...record,
         id: row.id,
         ts: record.ts || row.created_at || new Date().toISOString(),
         _off: false,
-      }
-      await IDB.put(table, item)
+      })
       count++
-    }
-
-    for (const p of pendientesLocales) {
-      await IDB.put(table, p)
     }
   }
 
