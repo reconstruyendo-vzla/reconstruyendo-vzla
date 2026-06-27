@@ -18,6 +18,11 @@ async function probarFetch(url: string, init?: RequestInit, timeoutMs = 6000): P
   }
 }
 
+/** Solo indica si el navegador cree que hay red — no bloquea sync ni publicar */
+export function navegadorEnLinea(): boolean {
+  return typeof navigator === 'undefined' || navigator.onLine !== false
+}
+
 export async function hayInternetReal(): Promise<boolean> {
   if (typeof window === 'undefined') return false
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return false

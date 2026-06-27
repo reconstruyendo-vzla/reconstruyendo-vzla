@@ -19,7 +19,7 @@ import {
   eliminarEnServidor,
   sincronizarTodo,
 } from '@/lib/offline-sync'
-import { hayInternetReal, iniciarVigilanciaConexion, suscribirConexion } from '@/lib/network'
+import { hayInternetReal, iniciarVigilanciaConexion, navegadorEnLinea, suscribirConexion } from '@/lib/network'
 import { iniciarOneSignalCuandoListo } from '@/lib/onesignal-client'
 import { RedRescate } from '@/components/RedRescate'
 import { CompartirSinInternet } from '@/components/CompartirSinInternet'
@@ -117,7 +117,7 @@ async function publicarReporte(
     return { ok: false, enRed: false }
   }
 
-  const redReal = await hayInternetReal()
+  const redReal = navegadorEnLinea()
 
   if (!redReal) {
     addQ({
@@ -148,7 +148,7 @@ async function publicarReporte(
       patch: mode === 'upsert' ? item : undefined,
       ...(notify ? { notify } : {}),
     })
-    const sigueOnline = await hayInternetReal()
+    const sigueOnline = navegadorEnLinea()
     onToast(sigueOnline ? 'No se pudo publicar en la red — reintentando…' : sinSenalMsg, 'warn')
     return { ok: false, enRed: false }
   }
@@ -368,7 +368,7 @@ async function actualizarPersona(
   const updated = { ...local, ...patch }
   await IDB.put('personas', { ...updated, _off: true })
 
-  const redReal = await hayInternetReal()
+  const redReal = navegadorEnLinea()
   if (!redReal) {
     addQ({ table: 'personas', action: 'update', id, patch })
     onToast(MSG_SIN_SENAL, 'ok')
@@ -384,7 +384,7 @@ async function actualizarPersona(
   } catch (e) {
     console.error('actualizarPersona error:', e)
     addQ({ table: 'personas', action: 'update', id, patch })
-    const sigueOnline = await hayInternetReal()
+    const sigueOnline = navegadorEnLinea()
     onToast(sigueOnline ? 'Actualizado aquí — reintentando subir…' : MSG_SIN_SENAL, sigueOnline ? 'warn' : 'ok')
     return updated
   }
@@ -406,7 +406,7 @@ async function eliminarRegistro(
     })
   )
 
-  const redReal = await hayInternetReal()
+  const redReal = navegadorEnLinea()
   if (!redReal) {
     addQ({ table, action: 'delete', id })
     if (!silent) onToast(MSG_PUBLICADO, 'ok')
@@ -2596,7 +2596,7 @@ export default function CrisisVE() {
 
   const sincronizar = useCallback(async (silent = false) => {
     if (typeof navigator === 'undefined' || syncingRef.current) return
-    if (navigator.onLine === false) return
+    if (!navegadorEnLinea()) return
     syncingRef.current = true
     setSyncing(true)
     const red = await hayInternetReal()
@@ -2639,7 +2639,7 @@ export default function CrisisVE() {
     const unsub = suscribirConexion((tieneSenal) => {
       setDetectando(false)
       setOnline(tieneSenal)
-      if (tieneSenal && getQ().length > 0) sincronizar(true)
+      if (getQ().length > 0) sincronizar(true)
     })
     return unsub
   }, [sincronizar])

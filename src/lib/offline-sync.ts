@@ -1,4 +1,4 @@
-import { hayInternetReal } from '@/lib/network'
+import { hayInternetReal, navegadorEnLinea } from '@/lib/network'
 import { supabase } from '@/lib/supabase'
 import {
   IDB,
@@ -61,6 +61,52 @@ export async function enviarNotificacion(payload: QueueNotify): Promise<boolean>
   }
 }
 
+async function publicarViaApi(
+  table: SupabaseTable,
+  data: BaseRecord,
+  mode: 'insert' | 'upsert'
+): Promise<boolean> {
+  try {
+    const res = await withTimeout(
+      fetch('/api/publicar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ table, data, mode }),
+      }),
+      30000
+    )
+    if (!res?.ok) {
+      const body = res ? await res.json().catch(() => ({})) : null
+      console.error('publicarViaApi', table, body?.error ?? res?.status)
+      return false
+    }
+    return true
+  } catch (e) {
+    console.error('publicarViaApi error:', e)
+    return false
+  }
+}
+
+async function eliminarViaApi(table: SupabaseTable, id: string): Promise<boolean> {
+  try {
+    const res = await withTimeout(
+      fetch(`/api/publicar?table=${encodeURIComponent(table)}&id=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      }),
+      15000
+    )
+    if (!res?.ok) {
+      const body = res ? await res.json().catch(() => ({})) : null
+      console.error('eliminarViaApi', table, body?.error ?? res?.status)
+      return false
+    }
+    return true
+  } catch (e) {
+    console.error('eliminarViaApi error:', e)
+    return false
+  }
+}
+
 /** Sube un reporte a Supabase — visible en todos los dispositivos */
 export async function publicarEnServidor(
   table: SupabaseTable,
@@ -68,40 +114,36 @@ export async function publicarEnServidor(
   mode: 'insert' | 'upsert' = 'upsert'
 ): Promise<boolean> {
   const row = { id: String(data.id), record: data }
-  const req =
-    mode === 'insert'
-      ? supabase.from(table).insert(row)
-      : supabase.from(table).upsert(row)
 
-  const result = await withTimeout(Promise.resolve(req), 30000)
+  const runDirect = async (m: 'insert' | 'upsert') => {
+    const query =
+      m === 'insert' ? supabase.from(table).insert(row) : supabase.from(table).upsert(row)
+    return withTimeout(Promise.resolve(query), 30000)
+  }
+
+  let result = await runDirect(mode)
   if (!result) {
-    console.error('publicarEnServidor', table, 'timeout')
-    return false
+    console.error('publicarEnServidor', table, 'timeout directo')
+    return publicarViaApi(table, data, mode)
   }
   if (!result.error) return true
 
   if (mode === 'insert') {
-    const retry = await withTimeout(Promise.resolve(supabase.from(table).upsert(row)), 30000)
-    if (!retry) {
-      console.error('publicarEnServidor', table, 'timeout en reintento')
-      return false
-    }
-    if (!retry.error) return true
-    console.error('publicarEnServidor', table, retry.error.message)
-    return false
+    const retry = await runDirect('upsert')
+    if (retry && !retry.error) return true
+    console.error('publicarEnServidor', table, retry?.error?.message ?? result.error.message)
+    return publicarViaApi(table, data, 'upsert')
   }
 
   console.error('publicarEnServidor', table, result.error.message)
-  return false
+  return publicarViaApi(table, data, mode)
 }
 
 export async function eliminarEnServidor(table: SupabaseTable, id: string): Promise<boolean> {
   const result = await withTimeout(Promise.resolve(supabase.from(table).delete().eq('id', id)), 15000)
-  if (!result || result.error) {
-    console.error('eliminarEnServidor', table, result?.error?.message)
-    return false
-  }
-  return true
+  if (result && !result.error) return true
+  console.error('eliminarEnServidor', table, result?.error?.message)
+  return eliminarViaApi(table, id)
 }
 
 /** Sube reportes que quedaron solo en un dispositivo */
@@ -124,7 +166,7 @@ async function subirHuerfanosLocales(serverIds: Map<SupabaseTable, Set<string>>)
 
 /** Descarga toda la red desde Supabase — siempre intenta si el navegador tiene conexión */
 export async function syncFromSupabase(): Promise<number> {
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) return 0
+  if (!navegadorEnLinea()) return 0
 
   let count = 0
   const serverIds = new Map<SupabaseTable, Set<string>>()
@@ -201,7 +243,7 @@ async function publicarItem(item: QueueItem): Promise<void> {
 }
 
 export async function processQueue(): Promise<{ synced: number; failed: number; notified: number }> {
-  if (!(await hayInternetReal())) return { synced: 0, failed: getQ().length, notified: 0 }
+  if (!navegadorEnLinea()) return { synced: 0, failed: getQ().length, notified: 0 }
 
   const queue = getQ()
   if (!queue.length) return { synced: 0, failed: 0, notified: 0 }
@@ -238,8 +280,7 @@ export async function sincronizarTodo(): Promise<{
   failed: number
   notified: number
 }> {
-  const puedeSubir = await hayInternetReal()
-  const { synced, failed, notified } = puedeSubir
+  const { synced, failed, notified } = navegadorEnLinea()
     ? await processQueue()
     : { synced: 0, failed: getQ().length, notified: 0 }
   const downloaded = await syncFromSupabase()
