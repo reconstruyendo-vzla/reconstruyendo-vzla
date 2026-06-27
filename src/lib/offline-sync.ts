@@ -74,11 +74,19 @@ export async function publicarEnServidor(
       : supabase.from(table).upsert(row)
 
   const result = await withTimeout(Promise.resolve(req), 30000)
-  if (!result?.error) return true
+  if (!result) {
+    console.error('publicarEnServidor', table, 'timeout')
+    return false
+  }
+  if (!result.error) return true
 
   if (mode === 'insert') {
     const retry = await withTimeout(Promise.resolve(supabase.from(table).upsert(row)), 30000)
-    if (!retry?.error) return true
+    if (!retry) {
+      console.error('publicarEnServidor', table, 'timeout en reintento')
+      return false
+    }
+    if (!retry.error) return true
     console.error('publicarEnServidor', table, retry.error.message)
     return false
   }
@@ -114,9 +122,9 @@ async function subirHuerfanosLocales(serverIds: Map<SupabaseTable, Set<string>>)
   return subidos
 }
 
-/** Descarga toda la red desde Supabase */
+/** Descarga toda la red desde Supabase — siempre intenta si el navegador tiene conexión */
 export async function syncFromSupabase(): Promise<number> {
-  if (!(await hayInternetReal())) return 0
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return 0
 
   let count = 0
   const serverIds = new Map<SupabaseTable, Set<string>>()
@@ -230,10 +238,10 @@ export async function sincronizarTodo(): Promise<{
   failed: number
   notified: number
 }> {
-  if (!(await hayInternetReal())) {
-    return { downloaded: 0, synced: 0, failed: getQ().length, notified: 0 }
-  }
-  const { synced, failed, notified } = await processQueue()
+  const puedeSubir = await hayInternetReal()
+  const { synced, failed, notified } = puedeSubir
+    ? await processQueue()
+    : { synced: 0, failed: getQ().length, notified: 0 }
   const downloaded = await syncFromSupabase()
   return { downloaded, synced, failed, notified }
 }

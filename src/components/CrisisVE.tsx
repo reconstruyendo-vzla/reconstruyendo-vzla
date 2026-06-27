@@ -2596,11 +2596,11 @@ export default function CrisisVE() {
 
   const sincronizar = useCallback(async (silent = false) => {
     if (typeof navigator === 'undefined' || syncingRef.current) return
-    const red = await hayInternetReal()
-    setOnline(red)
-    if (!red) return
+    if (navigator.onLine === false) return
     syncingRef.current = true
     setSyncing(true)
+    const red = await hayInternetReal()
+    setOnline(red)
     try {
       const pendingBefore = getQ().length
       if (!silent && pendingBefore > 0) {
@@ -2650,7 +2650,7 @@ export default function CrisisVE() {
     sincronizar(true)
     const onQueue = () => {
       setPending(getQ().length)
-      if (online) sincronizar(true)
+      sincronizar(true)
     }
     window.addEventListener('crisisve-queue', onQueue)
     return () => window.removeEventListener('crisisve-queue', onQueue)
