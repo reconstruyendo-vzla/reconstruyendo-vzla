@@ -6,8 +6,21 @@ let ultimoEstado: boolean | null = null
 const oyentes = new Set<Listener>()
 let vigilanciaActiva = false
 
+async function probarFetch(url: string, init?: RequestInit, timeoutMs = 6000): Promise<boolean> {
+  try {
+    const ctrl = new AbortController()
+    const t = setTimeout(() => ctrl.abort(), timeoutMs)
+    const res = await fetch(url, { ...init, signal: ctrl.signal, cache: 'no-store' })
+    clearTimeout(t)
+    return res.ok || (res.status > 0 && res.status < 500)
+  } catch {
+    return false
+  }
+}
+
 export async function hayInternetReal(): Promise<boolean> {
   if (typeof window === 'undefined') return false
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return false
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -16,42 +29,14 @@ export async function hayInternetReal(): Promise<boolean> {
 
   if (url && key) {
     probes.push(
-      (async () => {
-        try {
-          const ctrl = new AbortController()
-          const t = setTimeout(() => ctrl.abort(), 4500)
-          const res = await fetch(`${url}/rest/v1/`, {
-            method: 'HEAD',
-            headers: { apikey: key, Authorization: `Bearer ${key}` },
-            signal: ctrl.signal,
-            cache: 'no-store',
-          })
-          clearTimeout(t)
-          return res.status > 0 && res.status < 500
-        } catch {
-          return false
-        }
-      })()
+      probarFetch(`${url}/rest/v1/personas?select=id&limit=1`, {
+        method: 'GET',
+        headers: { apikey: key, Authorization: `Bearer ${key}` },
+      })
     )
   }
 
-  probes.push(
-    (async () => {
-      try {
-        const ctrl = new AbortController()
-        const t = setTimeout(() => ctrl.abort(), 3500)
-        await fetch(`${window.location.origin}/favicon.ico`, {
-          method: 'HEAD',
-          signal: ctrl.signal,
-          cache: 'no-store',
-        })
-        clearTimeout(t)
-        return true
-      } catch {
-        return false
-      }
-    })()
-  )
+  probes.push(probarFetch(`${window.location.origin}/`, { method: 'GET' }))
 
   const results = await Promise.all(probes)
   return results.some(Boolean)

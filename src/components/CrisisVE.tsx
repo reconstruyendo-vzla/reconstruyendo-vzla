@@ -19,16 +19,11 @@ import {
   sincronizarTodo,
 } from '@/lib/offline-sync'
 import { hayInternetReal, iniciarVigilanciaConexion, suscribirConexion } from '@/lib/network'
-import {
-  iniciarOneSignalCuandoListo,
-  needsIOSInstallStep,
-  pedirPermisoNotificaciones,
-  permisoNativoConcedido,
-  vigilarPermisoNotificaciones,
-} from '@/lib/onesignal-client'
+import { iniciarOneSignalCuandoListo } from '@/lib/onesignal-client'
 import { RedRescate } from '@/components/RedRescate'
 import { CompartirSinInternet } from '@/components/CompartirSinInternet'
 import { compressImage } from '@/lib/compress-image'
+import { esCreadorDelReporte, registrarCreadorDesdeItem } from '@/lib/creador-reporte'
 
 type ToastType = "ok" | "warn" | "green" | string
 type SectionProps = { online: boolean; onToast: (msg: string, type?: ToastType) => void; dataVersion: number }
@@ -87,37 +82,39 @@ const URGENCIAS = [
 
 const REMOTE_ESPECIALIDADES = ["Psicólogo/a", "Abogado/a", "Médico/a"];
 
-/** Mensajes claros — transparencia para todos */
-const MSG_PUBLICA_AUTO =
-  '✓ Guardado. La app detectó sin señal — se publicará sola automáticamente para todos.'
-const MSG_BTN_GUARDAR = 'GUARDAR REPORTE'
-const MSG_PILL_PENDIENTE = 'Se publicará con señal'
+/** Mensajes de publicación en la red de coordinación */
+const MSG_PUBLICADO = '✓ Publicado exitosamente'
+const MSG_SIN_SENAL = 'Sin señal de datos. Se publicará para todos cuando haya señal.'
+const MSG_BTN_PUBLICAR = 'PUBLICAR'
 
-function btnPublicar(_online: boolean, _conInternet: string): string {
-  return MSG_BTN_GUARDAR
+function btnPublicar(_online: boolean, etiqueta = 'PUBLICAR'): string {
+  return etiqueta === 'PUBLICAR' ? MSG_BTN_PUBLICAR : etiqueta
 }
+
+type PublicarResult = { ok: boolean; enRed: boolean }
 
 async function publicarReporte(
   table: SupabaseTable,
   item: BaseRecord,
   _online: boolean,
   onToast: SectionProps['onToast'],
-  options: { mode?: 'insert' | 'upsert'; okMsg?: string; offlineMsg?: string; notify?: QueueNotify } = {}
-): Promise<boolean> {
+  options: { mode?: 'insert' | 'upsert'; okMsg?: string; sinSenalMsg?: string; notify?: QueueNotify } = {}
+): Promise<PublicarResult> {
   const {
     mode = 'insert',
-    okMsg = '✓ Publicado — visible para todos en la web',
-    offlineMsg = MSG_PUBLICA_AUTO,
+    okMsg = MSG_PUBLICADO,
+    sinSenalMsg = MSG_SIN_SENAL,
     notify,
   } = options
   const row = { id: item.id, record: item }
 
   try {
     await IDB.put(table, { ...item, _off: true })
+    registrarCreadorDesdeItem(item)
   } catch (e) {
     console.error('IDB.put error:', e)
-    onToast('No se pudo guardar. Quita la foto o libera espacio en el teléfono.', 'warn')
-    return false
+    onToast('No se pudo registrar. Quita la foto o libera espacio en el teléfono.', 'warn')
+    return { ok: false, enRed: false }
   }
 
   const redReal = await hayInternetReal()
@@ -131,24 +128,21 @@ async function publicarReporte(
       patch: mode === 'upsert' ? item : undefined,
       ...(notify ? { notify } : {}),
     })
-    onToast(offlineMsg, 'ok')
-    return true
+    onToast(sinSenalMsg, 'ok')
+    return { ok: true, enRed: false }
   }
 
   try {
-    const req = mode === 'upsert'
-      ? supabase.from(table).upsert(row)
-      : supabase.from(table).insert(row)
     const result = await Promise.race([
-      req,
+      supabase.from(table).upsert(row),
       new Promise<{ error: { message: string } }>((resolve) =>
-        setTimeout(() => resolve({ error: { message: 'timeout' } }), 8000)
+        setTimeout(() => resolve({ error: { message: 'timeout' } }), 15000)
       ),
     ])
     if (result.error) throw result.error
     await IDB.put(table, { ...item, _off: false })
     onToast(okMsg, 'ok')
-    return true
+    return { ok: true, enRed: true }
   } catch (e: unknown) {
     console.error('publicarReporte error:', e)
     addQ({
@@ -159,8 +153,9 @@ async function publicarReporte(
       patch: mode === 'upsert' ? item : undefined,
       ...(notify ? { notify } : {}),
     })
-    onToast(offlineMsg, 'ok')
-    return true
+    const sigueOnline = await hayInternetReal()
+    onToast(sigueOnline ? okMsg : sinSenalMsg, 'ok')
+    return { ok: true, enRed: sigueOnline }
   }
 }
 
@@ -181,6 +176,41 @@ function Back({onClick}:{onClick:()=>void}){ return <button onClick={onClick} st
 function Card({children,style={}}:{children:ReactNode;style?:CSSProperties}){ return <div style={{background:"white",borderRadius:16,padding:20,boxShadow:"0 1px 4px rgba(0,0,0,0.08)",...style}}>{children}</div>; }
 function Empty({icon,msg}:{icon:ReactNode;msg:string}){ return <div style={{textAlign:"center",padding:"44px 20px",color:C.muted}}><div style={{fontSize:44,marginBottom:10}}>{icon}</div><div style={{fontWeight:600,fontSize:15}}>{msg}</div></div>; }
 
+function BotonesCreador({
+  item,
+  onEditar,
+  onEliminar,
+  vertical = true,
+}: {
+  item: BaseRecord
+  onEditar: () => void
+  onEliminar: () => void
+  vertical?: boolean
+}) {
+  if (!esCreadorDelReporte(item)) return null
+  const btnStyle: CSSProperties = {
+    background: C.bg,
+    border: `1px solid ${C.border}`,
+    borderRadius: 8,
+    padding: '8px 10px',
+    fontSize: 14,
+    cursor: 'pointer',
+  }
+  return (
+    <div
+      style={{ display: 'flex', flexDirection: vertical ? 'column' : 'row', gap: 4, flexShrink: 0, alignSelf: 'center', marginRight: vertical ? 10 : 0 }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <button type="button" onClick={onEditar} style={{ ...btnStyle, background: C.primaryLt, borderColor: C.primaryMd, color: C.primary, fontWeight: 700 }} title="Editar">
+        ✎
+      </button>
+      <button type="button" onClick={onEliminar} style={btnStyle} title="Eliminar">
+        🗑
+      </button>
+    </div>
+  )
+}
+
 function Toast({msg,type="ok",onClose}:{msg:string;type?:ToastType;onClose:()=>void}){
   useEffect(()=>{ const t=setTimeout(onClose,4000); return ()=>clearTimeout(t); },[onClose]);
   const bg = type==="ok"?C.primary:type==="warn"?C.amber:C.green;
@@ -200,105 +230,12 @@ function PhotoUpload({preview,onFile,label="Subir foto"}:{preview:string|null;on
   );
 }
 
-function NotificacionesBanner({ onToast }: { onToast: (msg: string, type?: ToastType) => void }) {
-  const [estado, setEstado] = useState<'ios-install' | 'off' | 'on'>(() => {
-    if (typeof window !== 'undefined' && needsIOSInstallStep()) return 'ios-install'
-    if (permisoNativoConcedido()) return 'on'
-    return 'off'
-  })
-
-  useEffect(() => {
-    if (permisoNativoConcedido()) return
-    return vigilarPermisoNotificaciones(() => setEstado('on'))
-  }, [])
-
-  const activar = () => {
-    if (estado === 'on') return
-
-    pedirPermisoNotificaciones((ok) => {
-      if (ok) {
-        setEstado('on')
-        onToast('Alertas activadas — recibirás zonas críticas al instante', 'ok')
-      } else if (needsIOSInstallStep()) {
-        setEstado('ios-install')
-      } else if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
-        onToast('Bloqueado. Chrome → ⋮ → Configuración del sitio → Notificaciones → Permitir', 'warn')
-      } else {
-        onToast('Toca Permitir en el popup del teléfono', 'warn')
-      }
-    })
-  }
-
-  if (estado === 'on') return null
-
-  return (
-    <div style={{
-      background: '#DC2626',
-      color: 'white',
-      padding: '12px 14px',
-      fontSize: 13,
-      position: 'sticky',
-      top: 0,
-      zIndex: 200,
-      boxShadow: '0 2px 12px rgba(0,0,0,0.2)',
-    }}>
-      {estado === 'ios-install' ? (
-        <div>
-          <div style={{ fontWeight: 900, marginBottom: 6 }}>iPhone: un paso extra (solo Apple)</div>
-          <div style={{ lineHeight: 1.5, opacity: 0.95, fontSize: 12 }}>
-            Safari → Compartir → <strong>Añadir a pantalla de inicio</strong> → abrir el icono → Permitir alertas.
-          </div>
-        </div>
-      ) : (
-        <>
-          <div style={{ fontWeight: 900, fontSize: 14, marginBottom: 4 }}>
-            EMERGENCIA — Activa alertas de zonas críticas
-          </div>
-          <div style={{ fontSize: 12, opacity: 0.95, marginBottom: 10, lineHeight: 1.45 }}>
-            Toca el botón → aparece un popup del sistema → elige <strong>Permitir</strong>
-          </div>
-          <Btn
-            onClick={activar}
-            full
-            color="#FFFFFF"
-            style={{ color: '#DC2626', fontWeight: 900, fontSize: 15 }}
-          >
-            PERMITIR ALERTAS AHORA
-          </Btn>
-        </>
-      )}
-    </div>
-  )
+function NotificacionesBanner(_props: { onToast: (msg: string, type?: ToastType) => void }) {
+  return null
 }
 
-function TransparenciaBanner({ online, pending, syncing, detectando }: { online: boolean; pending: number; syncing?: boolean; detectando?: boolean }) {
-  if (!detectando && online && pending === 0 && !syncing) return null
-
-  let texto: string | null = null
-  if (detectando) texto = 'Detectando señal automáticamente…'
-  else if (syncing) texto = '⏳ Publicando automáticamente — todos lo verán en la web…'
-  else if (!online) texto = '📡 Sin señal detectada — al volver, TODO se publica SOLO. La app lo vigila cada 5 segundos.'
-  else if (pending > 0) texto = `⏳ ${pending} reporte(s) publicándose solos ahora…`
-  if (!texto) return null
-
-  return (
-    <div style={{
-      background: syncing || (online && pending > 0) ? C.primaryLt : detectando ? C.amberLt : '#FEF2F2',
-      borderBottom: `2px solid ${syncing || (online && pending > 0) ? C.primary : detectando ? C.amber : '#DC2626'}`,
-      padding: '11px 14px',
-      fontSize: 13,
-      fontWeight: 700,
-      lineHeight: 1.5,
-      textAlign: 'center',
-      color: syncing || (online && pending > 0) ? C.primaryDk : detectando ? C.amber : '#B91C1C',
-    }}>
-      {texto}
-    </div>
-  )
-}
-
-function OfflineBanner({pending, syncing, online, detectando}:{pending:number; syncing?:boolean; online?:boolean; detectando?:boolean}){
-  return <TransparenciaBanner online={online === true} pending={pending} syncing={syncing} detectando={detectando} />
+function OfflineBanner(_props: { pending: number; syncing?: boolean; online?: boolean; detectando?: boolean }) {
+  return null
 }
 
 // ============================================================
@@ -439,7 +376,7 @@ async function actualizarPersona(
   const redReal = await hayInternetReal()
   if (!redReal) {
     addQ({ table: 'personas', action: 'update', id, patch })
-    onToast('Actualizado — se publicará para todos cuando haya señal', 'ok')
+    onToast(MSG_SIN_SENAL, 'ok')
     return updated
   }
 
@@ -447,25 +384,51 @@ async function actualizarPersona(
     const { error } = await supabase.from('personas').upsert({ id, record: updated })
     if (error) throw error
     await IDB.put('personas', { ...updated, _off: false })
-    onToast('Registro actualizado', 'ok')
+    onToast(MSG_PUBLICADO, 'ok')
     return updated
   } catch (e) {
     console.error('actualizarPersona error:', e)
     addQ({ table: 'personas', action: 'update', id, patch })
-    onToast('Actualizado — se publicará automáticamente con señal', 'ok')
+    const sigueOnline = await hayInternetReal()
+    onToast(sigueOnline ? MSG_PUBLICADO : MSG_SIN_SENAL, 'ok')
     return updated
   }
 }
 
-function quitarPersonaDeCola(id: string) {
+async function eliminarRegistro(
+  table: SupabaseTable,
+  id: string,
+  onToast: SectionProps['onToast'],
+  silent = false
+): Promise<boolean> {
+  await IDB.delete(table, id)
   setQ(
     getQ().filter((item) => {
-      if (item.table !== 'personas') return true
+      if (item.table !== table) return true
       if (item.id === id) return false
       if (item.data?.id === id) return false
       return true
     })
   )
+
+  const redReal = await hayInternetReal()
+  if (!redReal) {
+    addQ({ table, action: 'delete', id })
+    if (!silent) onToast(MSG_PUBLICADO, 'ok')
+    return true
+  }
+
+  try {
+    const { error } = await supabase.from(table).delete().eq('id', id)
+    if (error) throw error
+    if (!silent) onToast(MSG_PUBLICADO, 'ok')
+    return true
+  } catch (e) {
+    console.error('eliminarRegistro error:', e)
+    addQ({ table, action: 'delete', id })
+    if (!silent) onToast(MSG_PUBLICADO, 'ok')
+    return true
+  }
 }
 
 async function eliminarPersona(
@@ -473,27 +436,7 @@ async function eliminarPersona(
   onToast: SectionProps['onToast'],
   silent = false
 ): Promise<boolean> {
-  await IDB.delete('personas', id)
-  quitarPersonaDeCola(id)
-
-  const redReal = await hayInternetReal()
-  if (!redReal) {
-    addQ({ table: 'personas', action: 'delete', id })
-    if (!silent) onToast('Eliminado de tu teléfono', 'ok')
-    return true
-  }
-
-  try {
-    const { error } = await supabase.from('personas').delete().eq('id', id)
-    if (error) throw error
-    if (!silent) onToast('Eliminado de la lista', 'ok')
-    return true
-  } catch (e) {
-    console.error('eliminarPersona error:', e)
-    addQ({ table: 'personas', action: 'delete', id })
-    if (!silent) onToast('Eliminado aquí — se quitará de la red al reconectar', 'ok')
-    return true
-  }
+  return eliminarRegistro('personas', id, onToast, silent)
 }
 
 function personaLocalizada(estado?: string): boolean {
@@ -590,6 +533,7 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
   const [catF, setCatF] = useState("todos");
   const [estF, setEstF] = useState("todos");
   const [saving, setSaving] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [compartir, setCompartir] = useState<BaseRecord | null>(null);
   const [showResuelto, setShowResuelto] = useState(false);
   const [f, setF] = useState({ nombre:"",edad:"",cat:"nino_sano",hospital:"",sala:"",ubicacion:"",pais:"Venezuela",descripcion:"",contactoNombre:"",contacto:"",lat:null as number | null,lng:null as number | null });
@@ -598,9 +542,35 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
   useEffect(() => { reload(); }, [reload, dataVersion]);
 
   const abrirFormulario = () => {
+    setEditingId(null);
     setF({ nombre:"",edad:"",cat:"nino_sano",hospital:"",sala:"",ubicacion:"",pais:"Venezuela",descripcion:"",contactoNombre:"",contacto:"",lat:null,lng:null });
     setFoto(null);
     setView("form");
+  };
+
+  const abrirEdicion = (p: BaseRecord) => {
+    if (!esCreadorDelReporte(p)) {
+      onToast('Solo quien publicó este reporte puede editarlo', 'warn');
+      return;
+    }
+    setEditingId(String(p.id));
+    setF({
+      nombre: String(p.nombre ?? ''),
+      edad: String(p.edad ?? ''),
+      cat: String(p.cat ?? 'nino_sano'),
+      hospital: String(p.hospital ?? ''),
+      sala: String(p.sala ?? ''),
+      ubicacion: String(p.ubicacion ?? ''),
+      pais: String(p.pais ?? 'Venezuela'),
+      descripcion: String(p.descripcion ?? ''),
+      contactoNombre: String(p.contactoNombre ?? p.contacto_nombre ?? p.reporta_nombre ?? ''),
+      contacto: String(p.contacto ?? p.reporta_contacto ?? ''),
+      lat: typeof p.lat === 'number' ? p.lat : null,
+      lng: typeof p.lng === 'number' ? p.lng : null,
+    });
+    setFoto(p.foto ? String(p.foto) : null);
+    setSel(null);
+    setView('form');
   };
 
   useEffect(() => {
@@ -641,9 +611,11 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
     setSaving(true);
     try {
       const fotoFinal = foto ? await compressImage(foto) : null;
+      const previo = editingId ? await IDB.get('personas', editingId) : null;
       const item: BaseRecord = {
-        id: uid(),
-        ts: now(),
+        ...(previo || {}),
+        id: editingId || uid(),
+        ts: previo?.ts || now(),
         nombre,
         edad: f.edad,
         cat: f.cat,
@@ -660,17 +632,18 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
         lat,
         lng,
         foto: fotoFinal,
-        estado: "buscando",
-        created_at: new Date().toISOString(),
+        estado: previo?.estado || 'buscando',
+        created_at: previo?.created_at || new Date().toISOString(),
       }
-      const ok = await publicarReporte("personas", item, online, onToast, {
-        okMsg: "✓ Publicado — visible para todos en la web",
+      const { ok, enRed } = await publicarReporte("personas", item, online, onToast, {
+        mode: editingId ? 'upsert' : 'insert',
       });
       if (!ok) return;
       await reload();
       setView("list");
       setFoto(null);
-      setCompartir(item);
+      setEditingId(null);
+      if (!enRed) setCompartir(item);
       setF({ nombre:"",edad:"",cat:"nino_sano",hospital:"",sala:"",ubicacion:"",pais:"Venezuela",descripcion:"",contactoNombre:"",contacto:"",lat:null as number | null,lng:null as number | null });
     } finally {
       setSaving(false);
@@ -703,7 +676,12 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
   }
 
   const borrarPersona = async (id: string, nombre: string) => {
-    if (!confirm(`¿Eliminar a ${nombre} de la lista?\n\nSolo para casos ya localizados. Los datos ya quedaron registrados.`)) return
+    const item = items.find((p) => p.id === id);
+    if (item && !esCreadorDelReporte(item)) {
+      onToast('Solo quien publicó este reporte puede eliminarlo', 'warn');
+      return;
+    }
+    if (!confirm(`¿Eliminar el reporte de ${nombre}?\n\nSolo si fue un error o ya no aplica.`)) return
     const ok = await eliminarPersona(id, onToast)
     if (!ok) return
     await reload()
@@ -788,18 +766,19 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
               ✓ Caso resuelto — organizado con familia
             </div>
           )}
-          {personaLocalizada(String(sel.estado)) && (
-            <Btn
-              onClick={() => borrarPersona(sel.id, String(sel.nombre))}
-              color={C.muted}
-              outline
-              full
-              small
-            >
-              🗑 Eliminar de la lista (ya localizado/a)
-            </Btn>
-          )}
-          <div style={{ marginTop: 14 }}>
+          <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+            {esCreadorDelReporte(sel) && (
+              <>
+                <Btn outline full small onClick={() => abrirEdicion(sel)}>
+                  ✎ Editar reporte
+                </Btn>
+                <Btn outline color={C.red} full small onClick={() => borrarPersona(sel.id, String(sel.nombre))}>
+                  🗑 Eliminar
+                </Btn>
+              </>
+            )}
+          </div>
+          <div style={{ marginTop: 10 }}>
             <Btn outline color={C.red} full onClick={() => setCompartir(sel)}>
               📱 Enviar SMS a coordinación
             </Btn>
@@ -820,14 +799,9 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
     const isHosp = f.cat?.endsWith("hospital");
     return (
       <div>
-        <Back onClick={()=>setView("list")} />
+        <Back onClick={()=>{ setEditingId(null); setView("list"); }} />
         <Card>
-          <h3 style={{margin:"0 0 4px",fontWeight:800}}>Reportar Persona</h3>
-          <p style={{margin:"0 0 14px",fontSize:12,color:C.muted,lineHeight:1.5}}>
-            {online
-              ? "El GPS se fija solo desde este teléfono. Los coordinadores usan tu contacto para ir al lugar."
-              : "Sin señal: se guarda aquí y se publica sola para todos cuando vuelva la conexión."}
-          </p>
+          <h3 style={{margin:"0 0 14px",fontWeight:800}}>{editingId ? 'Editar reporte' : 'Reportar Persona'}</h3>
 
           <Field label="Ubicación del reporte (GPS automático) *">
             <GPSButton
@@ -869,7 +843,7 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
           <Field label="Última ubicación (texto, opcional)"><Input value={f.ubicacion} onChange={v=>setF(x=>({...x,ubicacion:v}))} placeholder="Ej: Sector Las Flores, La Guaira" /></Field>
           <Field label="País"><Input value={f.pais} onChange={v=>setF(x=>({...x,pais:v}))} placeholder="Venezuela" /></Field>
           <Field label="Descripción (ropa, señas, situación)"><Textarea value={f.descripcion} onChange={v=>setF(x=>({...x,descripcion:v}))} placeholder="Camisa azul, cabello corto…" /></Field>
-          <Btn onClick={save} full disabled={saving}>{saving ? "Guardando…" : btnPublicar(online, "Publicar Reporte")}</Btn>
+          <Btn onClick={save} full disabled={saving}>{saving ? "Publicando…" : (editingId ? 'PUBLICAR CAMBIOS' : btnPublicar(online, "Publicar Reporte"))}</Btn>
         </Card>
         {compartir && (
           <CompartirSinInternet item={compartir} onClose={() => setCompartir(null)} onToast={onToast} />
@@ -887,11 +861,6 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
 
   return (
     <div>
-      {!online && (
-        <div style={{background:C.primaryLt,border:`2px solid ${C.primary}`,borderRadius:12,padding:12,marginBottom:12,fontSize:13,lineHeight:1.5,color:C.primaryDk}}>
-          La app <strong>detectó sin señal</strong>. Todo se publicará <strong>sola</strong> en cuanto detecte conexión — revisa automáticamente cada 5 segundos.
-        </div>
-      )}
       {localizadas > 0 && (
         <div style={{ background: 'white', border: `1px solid ${C.border}`, borderRadius: 12, padding: 12, marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
           <span style={{ fontSize: 13, color: C.muted, lineHeight: 1.4 }}>
@@ -935,37 +904,19 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
               <div style={{display:"flex",gap:4,marginBottom:4,flexWrap:"wrap"}}>
                 <Pill label={est.label} color={est.color} bg={est.bg} />
                 <Pill label={cat.label} color={cat.color} bg={cat.bg} />
-                {p._off&&<Pill label={MSG_PILL_PENDIENTE} color={C.amber} bg={C.amberLt} />}
+                {p._off && null}
               </div>
               <div style={{fontWeight:800,fontSize:15,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.nombre}</div>
               {p.estado==='resuelto' && p.lleva_nombre && <div style={{fontSize:12,color:C.green,fontWeight:600}}>Con: {p.lleva_nombre} → {p.destino}</div>}
               {p.hospital&&<div style={{fontSize:12,color:C.sky,fontWeight:600}}>{p.hospital}</div>}
               {p.ubicacion&&<div style={{fontSize:12,color:C.muted}}>{p.ubicacion}</div>}
-              {p.lat&&<div style={{fontSize:11,color:C.teal}}>GPS guardado</div>}
+              {p.lat&&<div style={{fontSize:11,color:C.teal}}>GPS registrado</div>}
             </div>
-            {personaLocalizada(String(p.estado)) && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  borrarPersona(p.id, String(p.nombre))
-                }}
-                style={{
-                  alignSelf: 'center',
-                  marginRight: 10,
-                  background: C.bg,
-                  border: `1px solid ${C.border}`,
-                  borderRadius: 8,
-                  padding: '8px 10px',
-                  fontSize: 16,
-                  cursor: 'pointer',
-                  flexShrink: 0,
-                }}
-                title="Eliminar de la lista"
-              >
-                🗑
-              </button>
-            )}
+            <BotonesCreador
+              item={p}
+              onEditar={() => abrirEdicion(p)}
+              onEliminar={() => borrarPersona(p.id, String(p.nombre))}
+            />
           </div>
         );
       })}
@@ -1151,18 +1102,64 @@ function ZonasSection({ online, onToast, dataVersion }: SectionProps) {
   const [yoAsisto, setYoAsisto] = useState<Record<string, Asistente>>(getYoAsisto());
   const [showModal, setShowModal] = useState(false);
   const [alertaCompartir, setAlertaCompartir] = useState<BaseRecord | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [f, setF] = useState({ nombre:"",estado:"",pais:"Venezuela",descripcion:"",lat:null as number | null,lng:null as number | null,insumos:[] as string[],ayuda:[] as string[],personal:[] as string[],contactoNombre:"",contacto:"",urgencia:"critica" });
 
   const reload = useCallback(async () => setItems(await IDB.getAll("zonas")), []);
   useEffect(() => { reload(); }, [reload, dataVersion]);
 
+  const abrirFormulario = () => {
+    setEditingId(null);
+    setF({ nombre:'', estado:'', pais:'Venezuela', descripcion:'', lat:null, lng:null, insumos:[], ayuda:[], personal:[], contactoNombre:'', contacto:'', urgencia:'critica' });
+    setView('form');
+  };
+
+  const abrirEdicion = (z: BaseRecord) => {
+    if (!esCreadorDelReporte(z)) {
+      onToast('Solo quien publicó esta zona puede editarla', 'warn');
+      return;
+    }
+    setEditingId(String(z.id));
+    setF({
+      nombre: String(z.nombre ?? ''),
+      estado: String(z.estado ?? z.estado_vzla ?? ''),
+      pais: String(z.pais ?? 'Venezuela'),
+      descripcion: String(z.descripcion ?? ''),
+      lat: typeof z.lat === 'number' ? z.lat : null,
+      lng: typeof z.lng === 'number' ? z.lng : null,
+      insumos: [...(z.insumos || [])],
+      ayuda: [...(z.ayuda || [])],
+      personal: [...(z.personal || [])],
+      contactoNombre: String(z.contactoNombre ?? z.contacto_nombre ?? ''),
+      contacto: String(z.contacto ?? ''),
+      urgencia: String(z.urgencia ?? 'critica'),
+    });
+    setSel(null);
+    setView('form');
+  };
+
+  const borrarZona = async (id: string, nombre: string) => {
+    const item = items.find((z) => z.id === id);
+    if (item && !esCreadorDelReporte(item)) {
+      onToast('Solo quien publicó esta zona puede eliminarla', 'warn');
+      return;
+    }
+    if (!confirm(`¿Eliminar zona de crisis "${nombre}"?`)) return;
+    await eliminarRegistro('zonas', id, onToast);
+    await reload();
+    setSel(null);
+    setView('list');
+  };
+
   const tog = (field: "insumos" | "ayuda" | "personal", val: string) => setF(x => ({ ...x, [field]: x[field].includes(val) ? x[field].filter((v: string) => v !== val) : [...x[field], val] }));
 
   const saveZona = async () => {
     if (!f.nombre || !f.contacto) { onToast('Nombre y contacto son obligatorios', 'warn'); return; }
+    const previo = editingId ? await IDB.get('zonas', editingId) : null;
     const item: BaseRecord = {
-      id: uid(),
-      ts: now(),
+      ...(previo || {}),
+      id: editingId || uid(),
+      ts: previo?.ts || now(),
       nombre: f.nombre,
       estado: f.estado,
       estado_vzla: f.estado,
@@ -1177,21 +1174,21 @@ function ZonasSection({ online, onToast, dataVersion }: SectionProps) {
       contacto_nombre: f.contactoNombre,
       contacto: f.contacto,
       urgencia: f.urgencia,
-      estado_zona: 'activa',
-      created_at: new Date().toISOString(),
+      estado_zona: previo?.estado_zona || 'activa',
+      created_at: previo?.created_at || new Date().toISOString(),
     }
-    const critica = f.urgencia === 'critica'
-    await publicarReporte('zonas', item, online, onToast, {
-      okMsg: '✓ Zona publicada — visible para todos',
+    const critica = f.urgencia === 'critica' && !editingId
+    const { enRed } = await publicarReporte('zonas', item, online, onToast, {
+      mode: editingId ? 'upsert' : 'insert',
       ...(critica ? { notify: notificacionZonaCritica(item) } : {}),
     })
-    if (critica) {
-      const red = await hayInternetReal()
-      if (red) enviarNotificacion(notificacionZonaCritica(item)).catch(() => {})
-      setAlertaCompartir(item)
+    if (critica && !editingId) {
+      if (enRed) enviarNotificacion(notificacionZonaCritica(item)).catch(() => {})
+      else setAlertaCompartir(item)
     }
     await reload()
     setView('list')
+    setEditingId(null)
     setF({ nombre:'', estado:'', pais:'Venezuela', descripcion:'', lat:null, lng:null, insumos:[], ayuda:[], personal:[], contactoNombre:'', contacto:'', urgencia:'critica' })
   };
 
@@ -1257,7 +1254,13 @@ function ZonasSection({ online, onToast, dataVersion }: SectionProps) {
             onAsistir={() => setShowModal(true)}
             onRetirar={handleRetirar}
           />
-          <div style={{ marginTop: 14 }}>
+          <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {esCreadorDelReporte(sel) && (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Btn outline full small onClick={() => abrirEdicion(sel)}>✎ Editar zona</Btn>
+                <Btn outline color={C.red} full small onClick={() => borrarZona(sel.id, String(sel.nombre))}>🗑 Eliminar</Btn>
+              </div>
+            )}
             <Btn outline color={C.red} full onClick={() => setAlertaCompartir(sel)}>
               📱 Enviar SMS a coordinación
             </Btn>
@@ -1281,9 +1284,9 @@ function ZonasSection({ online, onToast, dataVersion }: SectionProps) {
     <div>
       <ProtocoloZonasBanner />
       <RedRescate zonas={items} online={online} onToast={onToast} alertaRecienGuardada={alertaCompartir} onCerrarAlerta={() => setAlertaCompartir(null)} />
-      <Back onClick={() => setView("list")} />
+      <Back onClick={() => { setEditingId(null); setView("list"); }} />
       <Card>
-        <h3 style={{ margin: "0 0 4px", fontWeight: 800 }}>Reportar Zona de Crisis</h3>
+        <h3 style={{ margin: "0 0 4px", fontWeight: 800 }}>{editingId ? 'Editar zona de crisis' : 'Reportar Zona de Crisis'}</h3>
         <p style={{ margin: "0 0 14px", fontSize: 12, color: C.muted }}>Usa GPS para marcar la ubicación exacta y que los voluntarios lleguen sin errores</p>
         <Field label="Nivel de urgencia">
           <div style={{ display: "flex", gap: 6 }}>
@@ -1302,7 +1305,7 @@ function ZonasSection({ online, onToast, dataVersion }: SectionProps) {
         <Field label="Personal que se solicita"><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{PERSONAL.map((i: string) => <Chip key={i} label={i} active={f.personal.includes(i)} onClick={() => tog("personal", i)} />)}</div></Field>
         <Field label="Coordinador de zona"><Input value={f.contactoNombre} onChange={v => setF(x => ({ ...x, contactoNombre: v }))} placeholder="Nombre de quien coordina" /></Field>
         <Field label="Contacto *"><Input value={f.contacto} onChange={v => setF(x => ({ ...x, contacto: v }))} placeholder="+58 414-000-0000 / @usuario" /></Field>
-        <Btn onClick={saveZona} full>{btnPublicar(online, "Publicar Zona de Crisis")}</Btn>
+        <Btn onClick={saveZona} full>{editingId ? 'PUBLICAR CAMBIOS' : btnPublicar(online, 'PUBLICAR')}</Btn>
       </Card>
     </div>
   );
@@ -1334,7 +1337,7 @@ function ZonasSection({ online, onToast, dataVersion }: SectionProps) {
           <Chip label="Todas" active={urgF === "todos"} onClick={() => setUrgF("todos")} />
           {URGENCIAS.map(u => <Chip key={u.id} label={u.label} active={urgF === u.id} onClick={() => setUrgF(u.id)} color={u.color} />)}
         </div>
-        <Btn onClick={() => setView("form")} small>+ Zona</Btn>
+        <Btn onClick={abrirFormulario} small>+ Zona</Btn>
       </div>
 
       {filtered.length === 0
@@ -1344,12 +1347,13 @@ function ZonasSection({ online, onToast, dataVersion }: SectionProps) {
           const totalA = (asistentes[z.id] || []).length;
           const yoVoy = !!yoAsisto[z.id];
           return (
-            <div key={z.id} onClick={() => { setSel(z); setView("detail"); }} style={{ background: "white", borderRadius: 12, padding: "14px 16px", marginBottom: 10, cursor: "pointer", borderLeft: `4px solid ${u.color}`, boxShadow: "0 1px 3px rgba(0,0,0,0.07)" }}>
+            <div key={z.id} onClick={() => { setSel(z); setView("detail"); }} style={{ background: "white", borderRadius: 12, padding: "14px 16px", marginBottom: 10, cursor: "pointer", borderLeft: `4px solid ${u.color}`, boxShadow: "0 1px 3px rgba(0,0,0,0.07)", display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", gap: 5, marginBottom: 6, flexWrap: "wrap", alignItems: "center" }}>
                 <Pill label={u.label} color={u.color} bg={u.bg} />
                 <Pill label={z.estado_zona === "activa" ? "Activa" : "Atendida"} color={z.estado_zona === "activa" ? C.primary : C.green} bg={z.estado_zona === "activa" ? C.primaryLt : C.greenLt} />
                 {z.lat && <Pill label="GPS" color={C.teal} bg={C.tealLt} />}
-                {z._off && <Pill label={MSG_PILL_PENDIENTE} color={C.amber} bg={C.amberLt} />}
+                {z._off && null}
               </div>
               <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 2 }}>{z.nombre}</div>
               <div style={{ fontSize: 12, color: C.muted, marginBottom: 6 }}>{[z.estado, z.pais].filter(Boolean).join(",")}</div>
@@ -1369,6 +1373,8 @@ function ZonasSection({ online, onToast, dataVersion }: SectionProps) {
                   : <span style={{ fontSize: 11, fontWeight: 700, color: C.primary, background: C.primaryLt, padding: "3px 8px", borderRadius: 20 }}>Toca para asistir</span>
                 }
               </div>
+              </div>
+              <BotonesCreador item={z} onEditar={() => abrirEdicion(z)} onEliminar={() => borrarZona(z.id, String(z.nombre))} />
             </div>
           );
         })
@@ -1383,6 +1389,7 @@ function ZonasSection({ online, onToast, dataVersion }: SectionProps) {
 function MascotasSection({ online, onToast, dataVersion }: SectionProps) {
   const [items, setItems] = useState<BaseRecord[]>([]);
   const [view, setView] = useState("list");
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [foto, setFoto] = useState<string | null>(null);
   const [catF, setCatF] = useState("todos");
   const [f, setF] = useState({ especie:"Perro",nombre:"",color:"",cat:"sana",heridas:"",ubicacion:"",contacto:"",contactoNombre:"",lat:null as number | null,lng:null as number | null });
@@ -1390,36 +1397,82 @@ function MascotasSection({ online, onToast, dataVersion }: SectionProps) {
   const reload = useCallback(async()=>setItems(await IDB.getAll("mascotas")),[]);
   useEffect(()=>{ reload(); },[reload, dataVersion]);
 
+  const abrirFormulario = () => {
+    setEditingId(null);
+    setF({ especie:"Perro",nombre:"",color:"",cat:"sana",heridas:"",ubicacion:"",contacto:"",contactoNombre:"",lat:null,lng:null });
+    setFoto(null);
+    setView("form");
+  };
+
+  const abrirEdicion = (m: BaseRecord) => {
+    if (!esCreadorDelReporte(m)) {
+      onToast('Solo quien publicó este reporte puede editarlo', 'warn');
+      return;
+    }
+    setEditingId(String(m.id));
+    setF({
+      especie: String(m.especie || m.tipo || 'Perro'),
+      nombre: String(m.nombre ?? ''),
+      color: String(m.color ?? ''),
+      cat: String(m.cat ?? 'sana'),
+      heridas: String(m.heridas || m.descripcion || ''),
+      ubicacion: String(m.ubicacion ?? ''),
+      contacto: String(m.contacto ?? ''),
+      contactoNombre: String(m.contactoNombre ?? ''),
+      lat: typeof m.lat === 'number' ? m.lat : null,
+      lng: typeof m.lng === 'number' ? m.lng : null,
+    });
+    setFoto(m.foto ? String(m.foto) : null);
+    setView('form');
+  };
+
   const save = async () => {
     if (!f.ubicacion||!f.contacto) { onToast("Ubicación y contacto obligatorios","warn"); return; }
+    const previo = editingId ? await IDB.get('mascotas', editingId) : null;
+    const fotoFinal = foto ? await compressImage(foto) : null;
     const item: BaseRecord = {
-      id: uid(),
-      ts: now(),
+      ...(previo || {}),
+      id: editingId || uid(),
+      ts: previo?.ts || now(),
       especie: f.especie,
+      tipo: f.especie,
       nombre: f.nombre,
       color: f.color,
       cat: f.cat,
       heridas: f.heridas,
+      descripcion: f.heridas,
       ubicacion: f.ubicacion,
       contacto: f.contacto,
       contactoNombre: f.contactoNombre,
       lat: f.lat ?? null,
       lng: f.lng ?? null,
-      foto: foto ?? null,
-      created_at: new Date().toISOString(),
+      foto: fotoFinal,
+      created_at: previo?.created_at || new Date().toISOString(),
     }
-    await publicarReporte("mascotas", item, online, onToast, { okMsg: "Mascota publicada correctamente" })
-    await reload(); setView("list"); setFoto(null);
+    const { ok } = await publicarReporte("mascotas", item, online, onToast, { mode: editingId ? 'upsert' : 'insert' });
+    if (!ok) return;
+    await reload(); setView("list"); setFoto(null); setEditingId(null);
     setF({ especie:"Perro",nombre:"",color:"",cat:"sana",heridas:"",ubicacion:"",contacto:"",contactoNombre:"",lat:null as number | null,lng:null as number | null });
+  };
+
+  const borrar = async (id: string, nombre: string) => {
+    const item = items.find((m) => m.id === id);
+    if (item && !esCreadorDelReporte(item)) {
+      onToast('Solo quien publicó este reporte puede eliminarlo', 'warn');
+      return;
+    }
+    if (!confirm(`¿Eliminar reporte de ${nombre || 'esta mascota'}?`)) return;
+    await eliminarRegistro('mascotas', id, onToast);
+    await reload();
   };
 
   const filtered = catF==="todos"?items:items.filter((m: BaseRecord)=>m.cat===catF);
 
   if (view==="form") return (
     <div>
-      <Back onClick={()=>setView("list")} />
+      <Back onClick={()=>{ setEditingId(null); setView("list"); }} />
       <Card>
-        <h3 style={{margin:"0 0 14px",fontWeight:800}}>Reportar Mascota</h3>
+        <h3 style={{margin:"0 0 14px",fontWeight:800}}>{editingId ? 'Editar reporte' : 'Reportar Mascota'}</h3>
         <PhotoUpload preview={foto} onFile={setFoto} label="Foto de la mascota" />
         <Field label="Estado">
           <div style={{display:"flex",gap:8}}>
@@ -1436,7 +1489,7 @@ function MascotasSection({ online, onToast, dataVersion }: SectionProps) {
         </Field>
         <Field label="Tu nombre"><Input value={f.contactoNombre} onChange={v=>setF(x=>({...x,contactoNombre:v}))} placeholder="Quien reporta" /></Field>
         <Field label="Contacto *"><Input value={f.contacto} onChange={v=>setF(x=>({...x,contacto:v}))} placeholder="+58 414-000-0000" /></Field>
-        <Btn onClick={save} full>{btnPublicar(online, "Publicar")}</Btn>
+        <Btn onClick={save} full>{editingId ? 'PUBLICAR CAMBIOS' : btnPublicar(online, 'PUBLICAR')}</Btn>
       </Card>
     </div>
   );
@@ -1452,7 +1505,7 @@ function MascotasSection({ online, onToast, dataVersion }: SectionProps) {
           <Chip label="Todas" active={catF==="todos"} onClick={()=>setCatF("todos")} />
           {MASCOTA_CATS.map(c=><Chip key={c.id} label={c.label} active={catF===c.id} onClick={()=>setCatF(c.id)} color={c.color} />)}
         </div>
-        <Btn onClick={()=>setView("form")} small>+ Reportar</Btn>
+        <Btn onClick={abrirFormulario} small>+ Reportar</Btn>
       </div>
       {filtered.length===0 ? <Empty icon={null} msg={items.length===0?"Sin reportes aún":"Sin resultados"} /> : filtered.map((m: BaseRecord)=>{
         const cat=MASCOTA_CATS.find(c=>c.id===m.cat)||MASCOTA_CATS[0];
@@ -1467,9 +1520,10 @@ function MascotasSection({ online, onToast, dataVersion }: SectionProps) {
               {m.color&&<div style={{fontSize:12,color:C.muted}}>{m.color}</div>}
               <div style={{fontSize:12,color:C.muted}}>{m.ubicacion}</div>
               {m.heridas&&<div style={{fontSize:12,color:C.amber,marginTop:2}}>{m.heridas}</div>}
-              {m.lat&&<div style={{fontSize:11,color:C.teal}}>GPS guardado</div>}
+              {m.lat&&<div style={{fontSize:11,color:C.teal}}>GPS registrado</div>}
               <div style={{fontSize:12,color:C.muted,marginTop:2}}>{m.contacto}</div>
             </div>
+            <BotonesCreador item={m} onEditar={() => abrirEdicion(m)} onEliminar={() => borrar(m.id, String(m.nombre || m.especie))} />
           </div>
         );
       })}
@@ -1484,6 +1538,7 @@ function VoluntariosSection({ online, onToast, dataVersion }: SectionProps) {
   const [items, setItems] = useState<BaseRecord[]>([]);
   const [view, setView] = useState("list");
   const [sel, setSel] = useState<BaseRecord | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [f, setF] = useState({ nombre:"",especialidades:[] as string[],pais:"Venezuela",ciudad:"",remoto:false,idiomas:"Español",bio:"",contacto:"",lat:null as number | null,lng:null as number | null });
 
@@ -1496,27 +1551,71 @@ function VoluntariosSection({ online, onToast, dataVersion }: SectionProps) {
   });
   const puedeRemoto = f.especialidades.some(e => REMOTE_ESPECIALIDADES.includes(e));
 
+  const abrirFormulario = () => {
+    setEditingId(null);
+    setF({ nombre:"",especialidades:[] as string[],pais:"Venezuela",ciudad:"",remoto:false,idiomas:"Español",bio:"",contacto:"",lat:null,lng:null });
+    setView("form");
+  };
+
+  const abrirEdicion = (v: BaseRecord) => {
+    if (!esCreadorDelReporte(v)) {
+      onToast('Solo quien se registró puede editar este perfil', 'warn');
+      return;
+    }
+    setEditingId(String(v.id));
+    setF({
+      nombre: String(v.nombre ?? ''),
+      especialidades: [...(v.especialidades || [])],
+      pais: String(v.pais ?? 'Venezuela'),
+      ciudad: String(v.ciudad ?? ''),
+      remoto: !!v.remoto,
+      idiomas: Array.isArray(v.idiomas) ? v.idiomas.join(', ') : String(v.idiomas ?? 'Español'),
+      bio: String(v.bio ?? ''),
+      contacto: String(v.contacto ?? ''),
+      lat: typeof v.lat === 'number' ? v.lat : null,
+      lng: typeof v.lng === 'number' ? v.lng : null,
+    });
+    setSel(null);
+    setView('form');
+  };
+
   const save = async () => {
     if (!f.nombre||!f.contacto||!f.especialidades.length) { onToast("Nombre, especialidad y contacto obligatorios","warn"); return; }
+    const previo = editingId ? await IDB.get('voluntarios', editingId) : null;
     const item: BaseRecord = {
-      id: uid(),
-      ts: now(),
+      ...(previo || {}),
+      id: editingId || uid(),
+      ts: previo?.ts || now(),
       nombre: f.nombre,
       contacto: f.contacto,
       especialidades: [...f.especialidades],
-      pais: "Venezuela",
+      pais: f.pais || "Venezuela",
       ciudad: f.ciudad,
       remoto: puedeRemoto ? f.remoto : false,
       idiomas: f.idiomas.split(",").map(s => s.trim()),
       bio: f.bio,
       lat: f.lat ?? null,
       lng: f.lng ?? null,
-      estado: "disponible",
-      created_at: new Date().toISOString(),
+      estado: previo?.estado || "disponible",
+      created_at: previo?.created_at || new Date().toISOString(),
     }
-    await publicarReporte("voluntarios", item, online, onToast, { okMsg: "Registrado como voluntario" })
-    await reload(); setView("list");
+    const { ok } = await publicarReporte("voluntarios", item, online, onToast, { mode: editingId ? 'upsert' : 'insert' });
+    if (!ok) return;
+    await reload(); setView("list"); setEditingId(null);
     setF({ nombre:"",especialidades:[] as string[],pais:"Venezuela",ciudad:"",remoto:false,idiomas:"Español",bio:"",contacto:"",lat:null as number | null,lng:null as number | null });
+  };
+
+  const borrar = async (id: string, nombre: string) => {
+    const item = items.find((v) => v.id === id);
+    if (item && !esCreadorDelReporte(item)) {
+      onToast('Solo quien se registró puede eliminar este perfil', 'warn');
+      return;
+    }
+    if (!confirm(`¿Eliminar registro de ${nombre}?`)) return;
+    await eliminarRegistro('voluntarios', id, onToast);
+    await reload();
+    setSel(null);
+    setView('list');
   };
 
   const filtered = items.filter((v: BaseRecord)=>{
@@ -1526,9 +1625,9 @@ function VoluntariosSection({ online, onToast, dataVersion }: SectionProps) {
 
   if (view==="form") return (
     <div>
-      <Back onClick={()=>setView("list")} />
+      <Back onClick={()=>{ setEditingId(null); setView("list"); }} />
       <Card>
-        <h3 style={{margin:"0 0 4px",fontWeight:800}}>Registrarme como Voluntario</h3>
+        <h3 style={{margin:"0 0 4px",fontWeight:800}}>{editingId ? 'Editar registro' : 'Registrarme como Voluntario'}</h3>
         <p style={{margin:"0 0 14px",fontSize:12,color:C.muted}}>Visible para coordinadores de todo el mundo que necesitan ayuda especializada</p>
         <Field label="Nombre completo *"><Input value={f.nombre} onChange={v=>setF(x=>({...x,nombre:v}))} placeholder="Tu nombre" /></Field>
         <Field label="Ciudad"><Input value={f.ciudad} onChange={v=>setF(x=>({...x,ciudad:v}))} placeholder="Ej: Caracas, Maracaibo, Valencia…" /></Field>
@@ -1547,7 +1646,7 @@ function VoluntariosSection({ online, onToast, dataVersion }: SectionProps) {
         </Field>
         <Field label="Sobre ti (opcional)"><Textarea value={f.bio} onChange={v=>setF(x=>({...x,bio:v}))} placeholder="Experiencia, equipamiento disponible…" rows={2} /></Field>
         <Field label="Contacto *"><Input value={f.contacto} onChange={v=>setF(x=>({...x,contacto:v}))} placeholder="+58 414-000-0000 / @usuario / email" /></Field>
-        <Btn onClick={save} full color={C.teal}>{btnPublicar(online, "Registrarme")}</Btn>
+        <Btn onClick={save} full color={C.teal}>{editingId ? 'PUBLICAR CAMBIOS' : btnPublicar(online, 'PUBLICAR')}</Btn>
       </Card>
     </div>
   );
@@ -1571,6 +1670,12 @@ function VoluntariosSection({ online, onToast, dataVersion }: SectionProps) {
         <div style={{borderTop:`1px solid ${C.border}`,paddingTop:14}}>
           <p style={{margin:0,fontSize:15,fontWeight:800,color:C.teal}}>{sel.contacto}</p>
         </div>
+        {esCreadorDelReporte(sel) && (
+          <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+            <Btn outline full small onClick={() => abrirEdicion(sel)}>✎ Editar</Btn>
+            <Btn outline color={C.red} full small onClick={() => borrar(sel.id, String(sel.nombre))}>🗑 Eliminar</Btn>
+          </div>
+        )}
       </Card>
     </div>
   );
@@ -1582,7 +1687,7 @@ function VoluntariosSection({ online, onToast, dataVersion }: SectionProps) {
       </div>
       <div style={{display:"flex",gap:8,marginBottom:10}}>
         <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Nombre, especialidad, ciudad…" style={{flex:1,padding:"10px 12px",borderRadius:8,border:`1.5px solid ${C.border}`,fontSize:13,outline:"none"}} />
-        <Btn onClick={()=>setView("form")} small color={C.teal}>+ Unirme</Btn>
+        <Btn onClick={abrirFormulario} small color={C.teal}>+ Unirme</Btn>
       </div>
       {filtered.length===0 ? <Empty icon={null} msg={items.length===0?"Sé el primero en registrarte":"Sin resultados"} /> : filtered.map((v: BaseRecord)=>(
         <div key={v.id} onClick={()=>{ setSel(v); setView("detail"); }} style={{background:"white",borderRadius:12,padding:"12px 14px",marginBottom:10,cursor:"pointer",borderLeft:`4px solid ${v.pais!=="Venezuela"?C.primary:C.teal}`,boxShadow:"0 1px 3px rgba(0,0,0,0.07)",display:"flex",gap:12,alignItems:"flex-start"}}>
@@ -1597,6 +1702,7 @@ function VoluntariosSection({ online, onToast, dataVersion }: SectionProps) {
             <div style={{fontSize:12,color:C.muted}}>{[v.ciudad,v.pais].filter(Boolean).join(",")}</div>
             {v.especialidades?.length>0&&<div style={{fontSize:12,color:C.teal,marginTop:2}}>{v.especialidades.slice(0,3).join("·")}{v.especialidades.length>3?` +${v.especialidades.length-3}`:""}</div>}
           </div>
+          <BotonesCreador item={v} onEditar={() => abrirEdicion(v)} onEliminar={() => borrar(v.id, String(v.nombre))} />
         </div>
       ))}
     </div>
@@ -1754,7 +1860,7 @@ function DonacionesSection({ online, onToast, dataVersion }: SectionProps) {
       verificado: false,
       created_at: new Date().toISOString(),
     }
-    await publicarReporte("donaciones", item, online, onToast, { okMsg: "¡Gracias! Tu donación fue registrada y se verificará pronto." })
+    await publicarReporte("donaciones", item, online, onToast)
     await reload(); setView("main"); setComp(null);
     setFd({ monto:"", moneda:"USD", metodo:"Zelle", nombre:"", mensaje:"" });
   };
@@ -2024,10 +2130,16 @@ const NECESIDADES_REFUGIO = [
   "Comunicaciones","Transporte","Colchonetas / camas","Personal de apoyo","Otro",
 ];
 
+const ESTADOS_REFUGIO = [
+  { id: 'activo', label: 'Activo — recibe ayuda', color: C.primary, bg: C.primaryLt },
+  { id: 'saturado', label: 'Saturado — no se necesitan donaciones', color: C.amber, bg: C.amberLt },
+];
+
 function RefugiosSection({ online, onToast, dataVersion }: SectionProps) {
   const [refugios, setRefugios]   = useState<BaseRecord[]>([]);
   const [view, setView]           = useState("list"); // list | form_refugio | detalle | form_persona
   const [sel, setSel] = useState<BaseRecord | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [q, setQ]                 = useState("");
   const [foto, setFoto] = useState<string | null>(null);
   const [fotoPer, setFotoPer] = useState<string | null>(null);
@@ -2036,7 +2148,7 @@ function RefugiosSection({ online, onToast, dataVersion }: SectionProps) {
   const [fr, setFr] = useState({
     nombre:"", direccion:"", municipio:"", estado:"", pais:"Venezuela",
     capacidad:"", descripcion:"", lat:null as number | null, lng:null as number | null,
-    necesidades:[] as string[], contactoNombre:"", contacto:"",
+    necesidades:[] as string[], contactoNombre:"", contacto:"", estado_refugio:"activo",
   });
 
   // Form nueva persona dentro de refugio
@@ -2050,12 +2162,61 @@ function RefugiosSection({ online, onToast, dataVersion }: SectionProps) {
 
   const togN = (v: string) => setFr(x => ({ ...x, necesidades: x.necesidades.includes(v) ? x.necesidades.filter((n: string)=>n!==v) : [...x.necesidades, v] }));
 
+  const abrirFormularioRefugio = () => {
+    setEditingId(null);
+    setFr({ nombre:"",direccion:"",municipio:"",estado:"",pais:"Venezuela",capacidad:"",descripcion:"",lat:null,lng:null,necesidades:[],contactoNombre:"",contacto:"",estado_refugio:"activo" });
+    setFoto(null);
+    setView('form_refugio');
+  };
+
+  const abrirEdicionRefugio = (r: BaseRecord) => {
+    if (!esCreadorDelReporte(r)) {
+      onToast('Solo el coordinador que registró este refugio puede editarlo', 'warn');
+      return;
+    }
+    setEditingId(String(r.id));
+    setFr({
+      nombre: String(r.nombre ?? ''),
+      direccion: String(r.direccion ?? ''),
+      municipio: String(r.municipio ?? ''),
+      estado: String(r.estado ?? ''),
+      pais: String(r.pais ?? 'Venezuela'),
+      capacidad: String(r.capacidad ?? ''),
+      descripcion: String(r.descripcion ?? ''),
+      lat: typeof r.lat === 'number' ? r.lat : null,
+      lng: typeof r.lng === 'number' ? r.lng : null,
+      necesidades: [...(r.necesidades || [])],
+      contactoNombre: String(r.contactoNombre ?? ''),
+      contacto: String(r.contacto ?? ''),
+      estado_refugio: String(r.estado_refugio ?? 'activo'),
+    });
+    setFoto(r.foto ? String(r.foto) : null);
+    setSel(null);
+    setView('form_refugio');
+  };
+
+  const borrarRefugio = async (id: string, nombre: string) => {
+    const item = refugios.find((r) => r.id === id);
+    if (item && !esCreadorDelReporte(item)) {
+      onToast('Solo el coordinador que registró este refugio puede eliminarlo', 'warn');
+      return;
+    }
+    if (!confirm(`¿Eliminar refugio "${nombre}"?`)) return;
+    await eliminarRegistro('refugios', id, onToast);
+    await reload();
+    setSel(null);
+    setView('list');
+  };
+
   // Guardar refugio
   const saveRefugio = async () => {
     if (!fr.nombre || !fr.contacto) { onToast("Nombre del refugio y contacto son obligatorios","warn"); return; }
+    const previo = editingId ? await IDB.get('refugios', editingId) : null;
+    const fotoFinal = foto ? await compressImage(foto) : (previo?.foto ?? null);
     const item: BaseRecord = {
-      id: uid(),
-      ts: now(),
+      ...(previo || {}),
+      id: editingId || uid(),
+      ts: previo?.ts || now(),
       nombre: fr.nombre,
       direccion: fr.direccion,
       municipio: fr.municipio,
@@ -2068,14 +2229,15 @@ function RefugiosSection({ online, onToast, dataVersion }: SectionProps) {
       necesidades: [...(fr.necesidades || [])],
       contactoNombre: fr.contactoNombre,
       contacto: fr.contacto,
-      foto: foto ?? null,
-      personas: [],
-      estado_refugio: "activo",
-      created_at: new Date().toISOString(),
+      foto: fotoFinal,
+      personas: previo?.personas || [],
+      estado_refugio: fr.estado_refugio,
+      created_at: previo?.created_at || new Date().toISOString(),
     }
-    await publicarReporte("refugios", item, online, onToast, { okMsg: "Refugio publicado correctamente" })
-    await reload(); setView("list"); setFoto(null);
-    setFr({ nombre:"",direccion:"",municipio:"",estado:"",pais:"Venezuela",capacidad:"",descripcion:"",lat:null as number | null,lng:null as number | null,necesidades:[] as string[],contactoNombre:"",contacto:"" });
+    const { ok } = await publicarReporte("refugios", item, online, onToast, { mode: editingId ? 'upsert' : 'insert' });
+    if (!ok) return;
+    await reload(); setView("list"); setFoto(null); setEditingId(null);
+    setFr({ nombre:"",direccion:"",municipio:"",estado:"",pais:"Venezuela",capacidad:"",descripcion:"",lat:null as number | null,lng:null as number | null,necesidades:[] as string[],contactoNombre:"",contacto:"",estado_refugio:"activo" });
   };
 
   // Guardar persona en refugio
@@ -2088,7 +2250,7 @@ function RefugiosSection({ online, onToast, dataVersion }: SectionProps) {
       ...refugio,
       personas: [...(refugio.personas || []), persona],
     }
-    await publicarReporte("refugios", updated, online, onToast, { mode: 'upsert', okMsg: "Persona registrada en el refugio" })
+    await publicarReporte("refugios", updated, online, onToast, { mode: 'upsert' })
     await reload();
     setSel(updated);
     setView("detalle"); setFotoPer(null);
@@ -2161,9 +2323,9 @@ function RefugiosSection({ online, onToast, dataVersion }: SectionProps) {
   // ── FORM REFUGIO ────────────────────────────────────────────
   if (view === "form_refugio") return (
     <div>
-      <Back onClick={()=>setView("list")} />
+      <Back onClick={()=>{ setEditingId(null); setView("list"); }} />
       <Card>
-        <h3 style={{margin:"0 0 4px",fontWeight:800}}>Registrar Refugio</h3>
+        <h3 style={{margin:"0 0 4px",fontWeight:800}}>{editingId ? 'Editar refugio' : 'Registrar Refugio'}</h3>
         <p style={{margin:"0 0 14px",fontSize:12,color:C.muted}}>Cada refugio tendrá su propia lista de personas para que las familias puedan buscar a los suyos</p>
         <PhotoUpload preview={foto} onFile={setFoto} label="Foto del refugio (opcional)" />
         <Field label="Nombre del refugio *">
@@ -2184,8 +2346,15 @@ function RefugiosSection({ online, onToast, dataVersion }: SectionProps) {
         <Field label="Capacidad aproximada (personas)">
           <Input value={fr.capacidad} onChange={v=>setFr(x=>({...x,capacidad:v}))} placeholder="Ej: 100 / 250 / sin límite por ahora" />
         </Field>
-        <Field label="Descripción del lugar">
-          <Textarea value={fr.descripcion} onChange={v=>setFr(x=>({...x,descripcion:v}))} placeholder="Condiciones del lugar, servicios disponibles (agua, electricidad, baños)…" rows={2} />
+        <Field label="Descripción / aviso para la red">
+          <Textarea value={fr.descripcion} onChange={v=>setFr(x=>({...x,descripcion:v}))} placeholder='Ej: "Saturado, no se necesitan donaciones por los momentos" o condiciones del lugar…' rows={3} />
+        </Field>
+        <Field label="Estado del refugio">
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            {ESTADOS_REFUGIO.map((e) => (
+              <Chip key={e.id} label={e.label} active={fr.estado_refugio===e.id} onClick={()=>setFr(x=>({...x,estado_refugio:e.id}))} color={e.color} />
+            ))}
+          </div>
         </Field>
         <Field label="Ubicación GPS">
           <GPSButton lat={fr.lat} lng={fr.lng} onLocation={(la, ln) => setFr(x => ({ ...x, lat: la, lng: ln }))} />
@@ -2201,7 +2370,7 @@ function RefugiosSection({ online, onToast, dataVersion }: SectionProps) {
         <Field label="Contacto *">
           <Input value={fr.contacto} onChange={v=>setFr(x=>({...x,contacto:v}))} placeholder="+58 414-000-0000 / @usuario" />
         </Field>
-        <Btn onClick={saveRefugio} full>{btnPublicar(online, "Publicar Refugio")}</Btn>
+        <Btn onClick={saveRefugio} full>{editingId ? 'PUBLICAR CAMBIOS' : btnPublicar(online, 'PUBLICAR')}</Btn>
       </Card>
     </div>
   );
@@ -2213,6 +2382,8 @@ function RefugiosSection({ online, onToast, dataVersion }: SectionProps) {
     const buscando = personas.filter((p: BaseRecord)=>p.estado==="buscando_familia").length;
     const reunidas = personas.filter((p: BaseRecord)=>p.estado==="reunida").length;
 
+    const refEst = ESTADOS_REFUGIO.find((e) => e.id === sel.estado_refugio) || ESTADOS_REFUGIO[0];
+
     return (
       <div>
         <Back onClick={()=>{ setSel(null); setView("list"); }} />
@@ -2221,8 +2392,8 @@ function RefugiosSection({ online, onToast, dataVersion }: SectionProps) {
         <Card style={{marginBottom:12}}>
           {sel.foto && <img src={sel.foto} alt="" style={{width:"100%",maxHeight:180,objectFit:"cover",borderRadius:10,marginBottom:12}} />}
           <div style={{display:"flex",gap:6,marginBottom:8,flexWrap:"wrap"}}>
-            <Pill label={(sel.estado_refugio ?? sel.estado)==="activo"?"Activo":"Cerrado"} color={(sel.estado_refugio ?? sel.estado)==="activo"?C.primary:C.muted} bg={(sel.estado_refugio ?? sel.estado)==="activo"?C.primaryLt:"#F1F5F9"} />
-            {sel._off&&<Pill label={MSG_PILL_PENDIENTE} color={C.amber} bg={C.amberLt} />}
+            <Pill label={refEst.label} color={refEst.color} bg={refEst.bg} />
+            {sel._off && null}
           </div>
           <h2 style={{margin:"0 0 4px",fontSize:19,fontWeight:800}}>{sel.nombre}</h2>
           {sel.direccion&&<p style={{margin:"0 0 2px",fontSize:13,color:C.muted}}>{sel.direccion}</p>}
@@ -2240,6 +2411,12 @@ function RefugiosSection({ online, onToast, dataVersion }: SectionProps) {
             {sel.contactoNombre&&<p style={{margin:"0 0 2px",fontWeight:700,fontSize:13}}>{sel.contactoNombre}</p>}
             <p style={{margin:0,fontSize:14,fontWeight:800,color:C.primary}}>{sel.contacto}</p>
           </div>
+          {esCreadorDelReporte(sel) && (
+            <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+              <Btn outline full small onClick={() => abrirEdicionRefugio(sel)}>✎ Editar refugio</Btn>
+              <Btn outline color={C.red} full small onClick={() => borrarRefugio(sel.id, String(sel.nombre))}>🗑 Eliminar</Btn>
+            </div>
+          )}
         </Card>
 
         {/* Stats personas */}
@@ -2330,7 +2507,7 @@ function RefugiosSection({ online, onToast, dataVersion }: SectionProps) {
       <div style={{display:"flex",gap:8,marginBottom:14}}>
         <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar por nombre, municipio, estado…"
           style={{flex:1,padding:"10px 12px",borderRadius:8,border:`1.5px solid ${C.border}`,fontSize:13,outline:"none"}} />
-        <Btn onClick={()=>setView("form_refugio")} small>+ Refugio</Btn>
+        <Btn onClick={abrirFormularioRefugio} small>+ Refugio</Btn>
       </div>
 
       {filtered.length === 0
@@ -2343,63 +2520,62 @@ function RefugiosSection({ online, onToast, dataVersion }: SectionProps) {
             const mayores    = personas.filter((p: BaseRecord)=>p.tipo==="mayor").length;
             const pct        = personas.length > 0 ? Math.round((reunidas/personas.length)*100) : 0;
 
+            const refEst = ESTADOS_REFUGIO.find((e) => e.id === r.estado_refugio) || ESTADOS_REFUGIO[0];
+
             return (
               <div key={r.id} onClick={()=>{ setSel(r); setView("detalle"); }}
-                style={{background:"white",borderRadius:14,marginBottom:12,overflow:"hidden",cursor:"pointer",boxShadow:"0 1px 4px rgba(0,0,0,0.09)",borderLeft:`4px solid ${C.primary}`}}>
-
-                {/* Foto si tiene */}
-                {r.foto && <img src={r.foto} alt="" style={{width:"100%",height:100,objectFit:"cover"}} />}
-
-                <div style={{padding:"12px 14px"}}>
-                  <div style={{display:"flex",gap:5,marginBottom:6,flexWrap:"wrap"}}>
-                    <Pill label="Activo" color={C.primary} bg={C.primaryLt} />
-                    {r.lat&&<Pill label="GPS" color={C.teal} bg={C.tealLt} />}
-                    {r._off&&<Pill label={MSG_PILL_PENDIENTE} color={C.amber} bg={C.amberLt} />}
-                  </div>
-                  <div style={{fontWeight:800,fontSize:16,marginBottom:2}}>{r.nombre}</div>
-                  <div style={{fontSize:12,color:C.muted,marginBottom:8}}>{[r.municipio,r.estado,r.pais].filter(Boolean).join(",")}</div>
-
-                  {/* Contador principal */}
-                  <div style={{display:"flex",gap:8,marginBottom:8}}>
-                    <div style={{background:C.primaryLt,borderRadius:8,padding:"8px 12px",flex:1,textAlign:"center"}}>
-                      <div style={{fontSize:22,fontWeight:900,color:C.primary,lineHeight:1}}>{personas.length}</div>
-                      <div style={{fontSize:10,fontWeight:700,color:C.muted,marginTop:2}}>Personas</div>
+                style={{background:"white",borderRadius:14,marginBottom:12,overflow:"hidden",cursor:"pointer",boxShadow:"0 1px 4px rgba(0,0,0,0.09)",borderLeft:`4px solid ${C.primary}`,display:'flex',alignItems:'stretch'}}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  {r.foto && <img src={r.foto} alt="" style={{width:"100%",height:100,objectFit:"cover"}} />}
+                  <div style={{padding:"12px 14px"}}>
+                    <div style={{display:"flex",gap:5,marginBottom:6,flexWrap:"wrap"}}>
+                      <Pill label={refEst.label} color={refEst.color} bg={refEst.bg} />
+                      {r.lat&&<Pill label="GPS" color={C.teal} bg={C.tealLt} />}
                     </div>
-                    {ninos>0&&<div style={{background:C.skyLt,borderRadius:8,padding:"8px 12px",flex:1,textAlign:"center"}}>
-                      <div style={{fontSize:22,fontWeight:900,color:C.sky,lineHeight:1}}>{ninos}</div>
-                      <div style={{fontSize:10,fontWeight:700,color:C.muted,marginTop:2}}>Niños/as</div>
-                    </div>}
-                    {mayores>0&&<div style={{background:"#F5F3FF",borderRadius:8,padding:"8px 12px",flex:1,textAlign:"center"}}>
-                      <div style={{fontSize:22,fontWeight:900,color:"#7C3AED",lineHeight:1}}>{mayores}</div>
-                      <div style={{fontSize:10,fontWeight:700,color:C.muted,marginTop:2}}>Mayores</div>
-                    </div>}
-                    {buscando>0&&<div style={{background:C.amberLt,borderRadius:8,padding:"8px 12px",flex:1,textAlign:"center"}}>
-                      <div style={{fontSize:22,fontWeight:900,color:C.amber,lineHeight:1}}>{buscando}</div>
-                      <div style={{fontSize:10,fontWeight:700,color:C.muted,marginTop:2}}>Buscando</div>
-                    </div>}
-                  </div>
+                    <div style={{fontWeight:800,fontSize:16,marginBottom:2}}>{r.nombre}</div>
+                    {r.descripcion && <div style={{ fontSize: 12, color: C.muted, marginBottom: 6, lineHeight: 1.4 }}>{r.descripcion}</div>}
+                    <div style={{fontSize:12,color:C.muted,marginBottom:8}}>{[r.municipio,r.estado,r.pais].filter(Boolean).join(",")}</div>
 
-                  {/* Barra de progreso reunificación */}
-                  {personas.length>0&&(
-                    <div>
-                      <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:C.muted,marginBottom:3}}>
-                        <span>Reunidas con familia</span>
-                        <span style={{fontWeight:700,color:C.green}}>{reunidas}/{personas.length} ({pct}%)</span>
+                    <div style={{display:"flex",gap:8,marginBottom:8}}>
+                      <div style={{background:C.primaryLt,borderRadius:8,padding:"8px 12px",flex:1,textAlign:"center"}}>
+                        <div style={{fontSize:22,fontWeight:900,color:C.primary,lineHeight:1}}>{personas.length}</div>
+                        <div style={{fontSize:10,fontWeight:700,color:C.muted,marginTop:2}}>Personas</div>
                       </div>
-                      <div style={{background:"#F1F5F9",borderRadius:20,height:6}}>
-                        <div style={{background:C.green,width:`${pct}%`,height:"100%",borderRadius:20,transition:"width 0.5s"}} />
-                      </div>
+                      {ninos>0&&<div style={{background:C.skyLt,borderRadius:8,padding:"8px 12px",flex:1,textAlign:"center"}}>
+                        <div style={{fontSize:22,fontWeight:900,color:C.sky,lineHeight:1}}>{ninos}</div>
+                        <div style={{fontSize:10,fontWeight:700,color:C.muted,marginTop:2}}>Niños/as</div>
+                      </div>}
+                      {mayores>0&&<div style={{background:"#F5F3FF",borderRadius:8,padding:"8px 12px",flex:1,textAlign:"center"}}>
+                        <div style={{fontSize:22,fontWeight:900,color:"#7C3AED",lineHeight:1}}>{mayores}</div>
+                        <div style={{fontSize:10,fontWeight:700,color:C.muted,marginTop:2}}>Mayores</div>
+                      </div>}
+                      {buscando>0&&<div style={{background:C.amberLt,borderRadius:8,padding:"8px 12px",flex:1,textAlign:"center"}}>
+                        <div style={{fontSize:22,fontWeight:900,color:C.amber,lineHeight:1}}>{buscando}</div>
+                        <div style={{fontSize:10,fontWeight:700,color:C.muted,marginTop:2}}>Buscando</div>
+                      </div>}
                     </div>
-                  )}
 
-                  {/* Necesidades si las tiene */}
-                  {r.necesidades?.length>0&&(
-                    <div style={{marginTop:8,display:"flex",gap:4,flexWrap:"wrap"}}>
-                      {r.necesidades.slice(0,3).map((n: string)=><Pill key={n} label={n} color={C.amber} bg={C.amberLt} />)}
-                      {r.necesidades.length>3&&<Pill label={`+${r.necesidades.length-3} más`} color={C.muted} bg="#F1F5F9" />}
-                    </div>
-                  )}
+                    {personas.length>0&&(
+                      <div>
+                        <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:C.muted,marginBottom:3}}>
+                          <span>Reunidas con familia</span>
+                          <span style={{fontWeight:700,color:C.green}}>{reunidas}/{personas.length} ({pct}%)</span>
+                        </div>
+                        <div style={{background:"#F1F5F9",borderRadius:20,height:6}}>
+                          <div style={{background:C.green,width:`${pct}%`,height:"100%",borderRadius:20,transition:"width 0.5s"}} />
+                        </div>
+                      </div>
+                    )}
+
+                    {r.necesidades?.length>0&&(
+                      <div style={{marginTop:8,display:"flex",gap:4,flexWrap:"wrap"}}>
+                        {r.necesidades.slice(0,3).map((n: string)=><Pill key={n} label={n} color={C.amber} bg={C.amberLt} />)}
+                        {r.necesidades.length>3&&<Pill label={`+${r.necesidades.length-3} más`} color={C.muted} bg="#F1F5F9" />}
+                      </div>
+                    )}
+                  </div>
                 </div>
+                <BotonesCreador item={r} onEditar={() => abrirEdicionRefugio(r)} onEliminar={() => borrarRefugio(r.id, String(r.nombre))} />
               </div>
             );
           })
@@ -2438,13 +2614,11 @@ export default function CrisisVE() {
       const { downloaded, synced, failed, notified } = await sincronizarTodo()
       setPending(getQ().length)
       setDataVersion((v) => v + 1)
-      if (synced > 0) {
+      if (!silent && synced > 0) {
         onToast(
-          silent
-            ? `✓ ${synced} publicado(s) automáticamente — todos lo ven ya`
-            : notified > 0
-              ? `${synced} publicados · alertas enviadas`
-              : `✓ ${synced} publicado(s) — visible para todos`,
+          notified > 0
+            ? `${synced} publicados · alertas enviadas`
+            : `✓ ${synced} publicado(s) — visible para todos`,
           'ok'
         )
       } else if (!silent && failed > 0 && pendingBefore > 0) {
@@ -2515,13 +2689,6 @@ export default function CrisisVE() {
             </div>
             <div style={{fontSize:10,color:"#0F172A",opacity:.75,marginTop:1}}>Coordinación de Emergencias · Venezuela</div>
           </div>
-          <div style={{display:"flex",alignItems:"center",gap:5,fontSize:10,fontWeight:700}}>
-            <div style={{width:7,height:7,borderRadius:"50%",background:detectando?C.amber:online?C.green:"#DC2626",flexShrink:0}} />
-            <span style={{color:"#0F172A"}}>
-              {detectando ? "Detectando señal…" : online ? "Con señal — publicando en vivo" : "Sin señal — la app publica sola al detectarla"}
-              {pending>0?` · ${pending} por publicar`:""}
-            </span>
-          </div>
         </div>
       </div>
 
@@ -2548,9 +2715,7 @@ export default function CrisisVE() {
 
       <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:680,background:"white",borderTop:`1px solid ${C.border}`,padding:"8px 16px",zIndex:80}}>
         <div style={{textAlign:'center', fontSize:10, color:C.muted}}>
-          Transparencia total · Se publica automáticamente con señal · #ReconstruyendoVenezuelaJuntos
-          <br/>
-          reconstruyendovzla26@gmail.com
+          #ReconstruyendoVenezuelaJuntos · reconstruyendovzla26@gmail.com
         </div>
       </div>
 

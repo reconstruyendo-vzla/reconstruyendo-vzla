@@ -5,7 +5,6 @@ import type { BaseRecord } from '@/lib/idb-store'
 import {
   compartirNativo,
   copiarTexto,
-  esPersona,
   numerosRescate,
   textoCompartirRegistro,
   urlSMS,
@@ -28,7 +27,6 @@ export function CompartirSinInternet({
 }) {
   const texto = textoCompartirRegistro(item)
   const nums = numerosRescate()
-  const esNino = esPersona(item)
 
   const abrirSMS = () => {
     window.location.href = urlSMS(texto, nums.length ? nums : undefined)
@@ -60,10 +58,10 @@ export function CompartirSinInternet({
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ fontWeight: 900, fontSize: 18, color: C.red, marginBottom: 6 }}>
-          {esNino ? 'Avisar sobre esta persona' : 'Avisar sobre esta zona'}
+          Reporte publicado
         </div>
         <p style={{ fontSize: 14, color: C.muted, marginBottom: 16, lineHeight: 1.5 }}>
-          Se publicará para todos cuando haya señal. Mientras tanto puedes enviar SMS a coordinación.
+          Sin señal de datos en este lugar. Se publicará para todos cuando haya señal. ¿Avisar ya por mensaje de texto?
         </p>
         <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 16, color: '#0F172A' }}>{item.nombre}</div>
 
