@@ -1,4 +1,6 @@
-const CACHE = 'rvzla-v3';
+importScripts('https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.sw.js');
+
+const CACHE = 'rvzla-v4';
 const STATIC = [
   '/',
   '/manifest.json',
@@ -25,7 +27,6 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
 
-  // Siempre pedir bundles nuevos de Next.js (evita JS viejo en caché)
   if (url.pathname.startsWith('/_next/')) {
     e.respondWith(fetch(e.request));
     return;
@@ -41,16 +42,5 @@ self.addEventListener('fetch', e => {
         return res;
       })
       .catch(() => caches.match(e.request))
-  );
-});
-
-self.addEventListener('push', e => {
-  const data = e.data?.json() || {};
-  e.waitUntil(
-    self.registration.showNotification(data.title || 'Reconstruyendo Vzla', {
-      body: data.body || 'Nueva actualización',
-      icon: '/icon-192.png',
-      badge: '/icon-192.png',
-    })
   );
 });

@@ -14,6 +14,12 @@ type QueueItem = { table: string; action: string; data?: BaseRecord; id?: string
 type Asistente = { nombre: string; contacto?: string; especialidad?: string; ts: string }
 type ToastState = { msg: string; type: ToastType } | null
 
+declare global {
+  interface Window {
+    OneSignalDeferred?: Array<(OneSignal: { init: (opts: Record<string, unknown>) => Promise<void> }) => void | Promise<void>>
+  }
+}
+
 // ============================================================
 // OFFLINE STORAGE — IndexedDB
 // ============================================================
@@ -1896,28 +1902,16 @@ export default function CrisisVE() {
   const [toast, setToast] = useState<ToastState>(null);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      import('react-onesignal').then((mod) => {
-        mod.default.init({
-          appId: process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID!,
-          allowLocalhostAsSecureOrigin: true,
-          notifyButton: { enable: false },
-          promptOptions: {
-            slidedown: {
-              prompts: [{
-                type: 'push',
-                autoPrompt: true,
-                text: {
-                  actionMessage: 'Recibe alertas de zonas críticas en Venezuela',
-                  acceptButton: 'Activar',
-                  cancelButton: 'Ahora no',
-                },
-              }],
-            },
-          },
-        } as unknown as Parameters<typeof mod.default.init>[0])
-      }).catch((e) => console.error('OneSignal init error:', e))
-    }
+    if (typeof window === 'undefined') return
+    window.OneSignalDeferred = window.OneSignalDeferred || []
+    window.OneSignalDeferred.push(async function (OneSignal) {
+      await OneSignal.init({
+        appId: process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID,
+        allowLocalhostAsSecureOrigin: true,
+        serviceWorkerParam: { scope: '/' },
+        serviceWorkerPath: 'sw.js',
+      })
+    })
   }, []);
 
   useEffect(()=>{
