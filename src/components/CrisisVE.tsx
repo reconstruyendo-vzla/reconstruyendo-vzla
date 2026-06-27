@@ -2,15 +2,23 @@
 
 import { useState, useEffect, useRef, useCallback, type CSSProperties, type ReactNode } from "react";
 import { supabase } from '@/lib/supabase'
+import {
+  IDB,
+  addQ,
+  getQ,
+  type BaseRecord,
+  type QueueItem,
+  type StoreName,
+  type SupabaseTable,
+} from '@/lib/idb-store'
+import {
+  enviarNotificacion,
+  notificacionZonaCritica,
+  sincronizarTodo,
+} from '@/lib/offline-sync'
 
 type ToastType = "ok" | "warn" | "green" | string
-type SectionProps = { online: boolean; onToast: (msg: string, type?: ToastType) => void }
-type StoreName = "personas" | "mascotas" | "zonas" | "voluntarios" | "donaciones" | "refugios" | "aliados" | "voluntarios_rec"
-type SupabaseTable = "personas" | "mascotas" | "zonas" | "voluntarios" | "donaciones" | "refugios"
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type BaseRecord = { id: string; ts?: string; _off?: boolean; [key: string]: any }
-type QueuePatch = Record<string, unknown>
-type QueueItem = { table: string; action: string; data?: BaseRecord; id?: string; patch?: QueuePatch }
+type SectionProps = { online: boolean; onToast: (msg: string, type?: ToastType) => void; dataVersion: number }
 type Asistente = { nombre: string; contacto?: string; especialidad?: string; ts: string }
 type ToastState = { msg: string; type: ToastType } | null
 
@@ -20,64 +28,10 @@ declare global {
   }
 }
 
-// ============================================================
-// OFFLINE STORAGE — IndexedDB
-// ============================================================
-const IDB = {
-  db: null as IDBDatabase | null,
-  async open(): Promise<IDBDatabase> {
-    if (this.db) return this.db;
-    return new Promise((res, rej) => {
-      const req = indexedDB.open("crisisve_v3", 3);
-      req.onupgradeneeded = (e) => {
-        const db = (e.target as IDBOpenDBRequest).result;
-        ["personas","mascotas","zonas","voluntarios","donaciones","refugios","aliados","voluntarios_rec"].forEach(s => {
-          if (!db.objectStoreNames.contains(s)) db.createObjectStore(s, { keyPath: "id" });
-        });
-      };
-      req.onsuccess = (e) => { this.db = (e.target as IDBOpenDBRequest).result; res(this.db); };
-      req.onerror = () => rej(req.error);
-    });
-  },
-  async getAll(store: StoreName): Promise<BaseRecord[]> {
-    const db = await this.open();
-    return new Promise((res, rej) => {
-      const tx = db.transaction(store, "readonly");
-      const req = tx.objectStore(store).getAll();
-      req.onsuccess = () => res(((req.result as BaseRecord[])||[]).sort((a,b)=>String(b.ts||"").localeCompare(String(a.ts||""))));
-      req.onerror = () => rej(req.error);
-    });
-  },
-  async put(store: StoreName, item: BaseRecord): Promise<BaseRecord> {
-    const db = await this.open();
-    return new Promise((res, rej) => {
-      const tx = db.transaction(store, "readwrite");
-      tx.objectStore(store).put(item);
-      tx.oncomplete = () => res(item);
-      tx.onerror = () => rej(tx.error);
-    });
-  },
-  async patch(store: StoreName, id: string, patch: Record<string, unknown>): Promise<BaseRecord> {
-    const db = await this.open();
-    return new Promise((res, rej) => {
-      const tx = db.transaction(store, "readwrite");
-      const s = tx.objectStore(store);
-      const req = s.get(id);
-      req.onsuccess = () => { const u = { ...(req.result as BaseRecord), ...patch }; s.put(u); res(u); };
-      req.onerror = () => rej(req.error);
-    });
-  }
-};
-
 const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
 const now = () => new Date().toISOString();
 const fmtDate = (ts?: string) => ts ? new Date(ts).toLocaleDateString("es-VE",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}) : "";
 const toB64 = (file: File) => new Promise<string>((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result as string); r.onerror=rej; r.readAsDataURL(file); });
-
-const QUEUE_KEY = "crisisve_queue_v3";
-const addQ = (item: QueueItem) => { try { const q=JSON.parse(localStorage.getItem(QUEUE_KEY)||"[]") as QueueItem[]; q.push(item); localStorage.setItem(QUEUE_KEY,JSON.stringify(q)); } catch{} };
-const getQ = (): QueueItem[] => { try { return JSON.parse(localStorage.getItem(QUEUE_KEY)||"[]"); } catch { return []; } };
-const clearQ = () => localStorage.removeItem(QUEUE_KEY);
 
 // ============================================================
 // TOKENS — Azul cielo humanitario
@@ -197,9 +151,13 @@ function PhotoUpload({preview,onFile,label="Subir foto"}:{preview:string|null;on
   );
 }
 
-function OfflineBanner({pending}:{pending:number}){
-  if(!pending) return null;
-  return <div style={{background:C.amberLt,borderBottom:`1px solid ${C.amber}`,padding:"8px 16px",fontSize:12,fontWeight:600,color:C.amber,textAlign:"center"}}>Sin conexión — {pending} reporte{pending>1?"s":""} guardado{pending>1?"s":""} localmente. Se sincronizarán cuando vuelva el internet.</div>;
+function OfflineBanner({pending, syncing}:{pending:number; syncing?:boolean}){
+  if (!pending && !syncing) return null;
+  return (
+    <div style={{background:C.amberLt,borderBottom:`1px solid ${C.amber}`,padding:"8px 14px",fontSize:12,fontWeight:600,color:C.amber,textAlign:"center"}}>
+      {syncing ? "Sincronizando datos…" : `${pending} reporte(s) pendiente(s) de publicar`}
+    </div>
+  );
 }
 
 // ============================================================
@@ -280,7 +238,7 @@ function GPSCoordsLink({ lat, lng }: { lat: number; lng: number }) {
 // ============================================================
 // PERSONAS
 // ============================================================
-function PersonasSection({ online, onToast }: SectionProps) {
+function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
   const [items, setItems] = useState<BaseRecord[]>([]);
   const [view, setView] = useState("list"); // list | form | detail
   const [sel, setSel] = useState<BaseRecord | null>(null);
@@ -291,7 +249,7 @@ function PersonasSection({ online, onToast }: SectionProps) {
   const [f, setF] = useState({ nombre:"",edad:"",cat:"nino_sano",hospital:"",sala:"",ubicacion:"",pais:"Venezuela",descripcion:"",contactoNombre:"",contacto:"",lat:null as number | null,lng:null as number | null });
 
   const reload = useCallback(async () => setItems(await IDB.getAll("personas")), []);
-  useEffect(() => { reload(); }, [reload]);
+  useEffect(() => { reload(); }, [reload, dataVersion]);
 
   const save = async () => {
     if (!f.nombre || !f.contacto) { onToast("Nombre y contacto son obligatorios","warn"); return; }
@@ -618,7 +576,7 @@ function ProtocoloZonasBanner() {
   );
 }
 
-function ZonasSection({ online, onToast }: SectionProps) {
+function ZonasSection({ online, onToast, dataVersion }: SectionProps) {
   const [items, setItems] = useState<BaseRecord[]>([]);
   const [view, setView] = useState("list");
   const [sel, setSel] = useState<BaseRecord | null>(null);
@@ -629,7 +587,7 @@ function ZonasSection({ online, onToast }: SectionProps) {
   const [f, setF] = useState({ nombre:"",estado:"",pais:"Venezuela",descripcion:"",lat:null as number | null,lng:null as number | null,insumos:[] as string[],ayuda:[] as string[],personal:[] as string[],contactoNombre:"",contacto:"",urgencia:"critica" });
 
   const reload = useCallback(async () => setItems(await IDB.getAll("zonas")), []);
-  useEffect(() => { reload(); }, [reload]);
+  useEffect(() => { reload(); }, [reload, dataVersion]);
 
   const tog = (field: "insumos" | "ayuda" | "personal", val: string) => setF(x => ({ ...x, [field]: x[field].includes(val) ? x[field].filter((v: string) => v !== val) : [...x[field], val] }));
 
@@ -662,15 +620,7 @@ function ZonasSection({ online, onToast }: SectionProps) {
         await IDB.put('zonas', { ...item, _off: false })
         onToast('Zona publicada correctamente', 'ok')
         if (f.urgencia === 'critica') {
-          await fetch('/api/notify', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              title: 'Zona Crítica Reportada',
-              message: `${f.nombre} en ${f.estado}, ${f.pais} necesita ayuda urgente`,
-              url: 'https://reconstruyendovzla.com',
-            }),
-          })
+          await enviarNotificacion(notificacionZonaCritica(item))
         }
       } else {
         throw new Error('offline')
@@ -678,7 +628,13 @@ function ZonasSection({ online, onToast }: SectionProps) {
     } catch (e: unknown) {
       console.error('saveZona error:', e)
       await IDB.put('zonas', { ...item, _off: true })
-      addQ({ table: 'zonas', action: 'insert', data: item })
+      const queueItem: QueueItem = {
+        table: 'zonas',
+        action: 'insert',
+        data: item,
+        ...(f.urgencia === 'critica' ? { notify: notificacionZonaCritica(item) } : {}),
+      }
+      addQ(queueItem)
       onToast(online ? 'Error al publicar — guardado localmente' : 'Sin conexión — guardado localmente', 'warn')
     }
     await reload()
@@ -864,7 +820,7 @@ function ZonasSection({ online, onToast }: SectionProps) {
 // ============================================================
 // MASCOTAS
 // ============================================================
-function MascotasSection({ online, onToast }: SectionProps) {
+function MascotasSection({ online, onToast, dataVersion }: SectionProps) {
   const [items, setItems] = useState<BaseRecord[]>([]);
   const [view, setView] = useState("list");
   const [foto, setFoto] = useState<string | null>(null);
@@ -872,7 +828,7 @@ function MascotasSection({ online, onToast }: SectionProps) {
   const [f, setF] = useState({ especie:"Perro",nombre:"",color:"",cat:"sana",heridas:"",ubicacion:"",contacto:"",contactoNombre:"",lat:null as number | null,lng:null as number | null });
 
   const reload = useCallback(async()=>setItems(await IDB.getAll("mascotas")),[]);
-  useEffect(()=>{ reload(); },[reload]);
+  useEffect(()=>{ reload(); },[reload, dataVersion]);
 
   const save = async () => {
     if (!f.ubicacion||!f.contacto) { onToast("Ubicación y contacto obligatorios","warn"); return; }
@@ -964,7 +920,7 @@ function MascotasSection({ online, onToast }: SectionProps) {
 // ============================================================
 // VOLUNTARIOS
 // ============================================================
-function VoluntariosSection({ online, onToast }: SectionProps) {
+function VoluntariosSection({ online, onToast, dataVersion }: SectionProps) {
   const [items, setItems] = useState<BaseRecord[]>([]);
   const [view, setView] = useState("list");
   const [sel, setSel] = useState<BaseRecord | null>(null);
@@ -972,7 +928,7 @@ function VoluntariosSection({ online, onToast }: SectionProps) {
   const [f, setF] = useState({ nombre:"",especialidades:[] as string[],pais:"Venezuela",ciudad:"",remoto:false,idiomas:"Español",bio:"",contacto:"",lat:null as number | null,lng:null as number | null });
 
   const reload = useCallback(async()=>setItems(await IDB.getAll("voluntarios")),[]);
-  useEffect(()=>{ reload(); },[reload]);
+  useEffect(()=>{ reload(); },[reload, dataVersion]);
   const togE = (v: string) => setF(x => {
     const especialidades = x.especialidades.includes(v) ? x.especialidades.filter((e: string)=>e!==v) : [...x.especialidades,v];
     const remoto = especialidades.some(e => REMOTE_ESPECIALIDADES.includes(e)) ? x.remoto : false;
@@ -1178,7 +1134,7 @@ function calcAliadosStats(aliados: Aliado[]) {
   return { totalAportado, totalMatches, count: aliados.length }
 }
 
-function DonacionesSection({ online, onToast }: SectionProps) {
+function DonacionesSection({ online, onToast, dataVersion }: SectionProps) {
   const [dons, setDons] = useState<BaseRecord[]>([])
   const [aliados, setAliados] = useState<Aliado[]>([])
   const [voluntariosRec, setVoluntariosRec] = useState<BaseRecord[]>([])
@@ -1208,7 +1164,7 @@ function DonacionesSection({ online, onToast }: SectionProps) {
   const reloadVoluntariosRec = useCallback(async () => {
     setVoluntariosRec(await IDB.getAll("voluntarios_rec"))
   }, [])
-  useEffect(() => { reload(); reloadAliados(); reloadVoluntariosRec() }, [reload, reloadAliados, reloadVoluntariosRec])
+  useEffect(() => { reload(); reloadAliados(); reloadVoluntariosRec() }, [reload, reloadAliados, reloadVoluntariosRec, dataVersion])
 
   const totalUSD = dons.filter((d: BaseRecord) => d.moneda === "USD" && d.verificado).reduce((s, d) => s + parseFloat(d.monto || 0), 0)
   const totalBS  = dons.filter((d: BaseRecord) => d.moneda === "Bs"  && d.verificado).reduce((s, d) => s + parseFloat(d.monto || 0), 0)
@@ -1508,7 +1464,7 @@ const NECESIDADES_REFUGIO = [
   "Comunicaciones","Transporte","Colchonetas / camas","Personal de apoyo","Otro",
 ];
 
-function RefugiosSection({ online, onToast }: SectionProps) {
+function RefugiosSection({ online, onToast, dataVersion }: SectionProps) {
   const [refugios, setRefugios]   = useState<BaseRecord[]>([]);
   const [view, setView]           = useState("list"); // list | form_refugio | detalle | form_persona
   const [sel, setSel] = useState<BaseRecord | null>(null);
@@ -1530,7 +1486,7 @@ function RefugiosSection({ online, onToast }: SectionProps) {
   });
 
   const reload = useCallback(async () => setRefugios(await IDB.getAll("refugios")), []);
-  useEffect(() => { reload(); }, [reload]);
+  useEffect(() => { reload(); }, [reload, dataVersion]);
 
   const togN = (v: string) => setFr(x => ({ ...x, necesidades: x.necesidades.includes(v) ? x.necesidades.filter((n: string)=>n!==v) : [...x.necesidades, v] }));
 
@@ -1899,7 +1855,41 @@ export default function CrisisVE() {
   const [tab, setTab] = useState("personas");
   const [online, setOnline] = useState(typeof navigator!=="undefined"?navigator.onLine:true);
   const [pending, setPending] = useState(0);
+  const [dataVersion, setDataVersion] = useState(0);
+  const [syncing, setSyncing] = useState(false);
   const [toast, setToast] = useState<ToastState>(null);
+  const syncingRef = useRef(false);
+
+  const onToast = useCallback((msg: string, type: ToastType = "ok") => setToast({msg,type}), []);
+
+  const sincronizar = useCallback(async (silent = false) => {
+    if (typeof navigator === 'undefined' || !navigator.onLine || syncingRef.current) return
+    syncingRef.current = true
+    setSyncing(true)
+    try {
+      const pendingBefore = getQ().length
+      if (!silent && pendingBefore > 0) {
+        onToast(`Sincronizando ${pendingBefore} reporte(s)…`, 'ok')
+      }
+      const { downloaded, synced, failed, notified } = await sincronizarTodo()
+      setPending(getQ().length)
+      setDataVersion((v) => v + 1)
+      if (!silent) {
+        if (synced > 0 && failed > 0) {
+          onToast(`${synced} publicados. ${failed} aún pendientes.`, 'warn')
+        } else if (synced > 0) {
+          onToast(notified > 0 ? `${synced} publicados · alertas enviadas` : `${synced} reporte(s) publicados`, 'ok')
+        } else if (downloaded > 0 && pendingBefore === 0) {
+          onToast('Datos actualizados', 'ok')
+        }
+      }
+    } catch (e) {
+      console.error('sincronizar error:', e)
+    } finally {
+      syncingRef.current = false
+      setSyncing(false)
+    }
+  }, [onToast]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -1914,16 +1904,27 @@ export default function CrisisVE() {
     })
   }, []);
 
-  useEffect(()=>{
-    setPending(getQ().length);
-    const up=()=>{ setOnline(true); const q=getQ(); if(q.length){ setToast({msg:`Conexión restaurada — sincronizando ${q.length} reporte(s)…`,type:"ok"}); setTimeout(()=>{ clearQ(); setPending(0); },2500); } };
-    const down=()=>setOnline(false);
-    window.addEventListener("online",up);
-    window.addEventListener("offline",down);
-    return ()=>{ window.removeEventListener("online",up); window.removeEventListener("offline",down); };
-  },[]);
+  useEffect(() => {
+    setPending(getQ().length)
+    sincronizar(true)
+    const onQueue = () => setPending(getQ().length)
+    window.addEventListener('crisisve-queue', onQueue)
+    return () => window.removeEventListener('crisisve-queue', onQueue)
+  }, [sincronizar])
 
-  const onToast = (msg: string, type: ToastType = "ok") => setToast({msg,type});
+  useEffect(() => {
+    const up = () => { setOnline(true); sincronizar() }
+    const down = () => setOnline(false)
+    window.addEventListener("online", up)
+    window.addEventListener("offline", down)
+    return () => { window.removeEventListener("online", up); window.removeEventListener("offline", down) }
+  }, [sincronizar])
+
+  useEffect(() => {
+    if (!online) return
+    const t = setInterval(() => sincronizar(true), 120000)
+    return () => clearInterval(t)
+  }, [online, sincronizar])
 
   return (
     <div style={{fontFamily:"'Segoe UI',system-ui,-apple-system,sans-serif",background:C.bg,minHeight:"100vh",color:C.txt,maxWidth:680,margin:"0 auto",position:"relative"}}>
@@ -1944,7 +1945,7 @@ export default function CrisisVE() {
         </div>
       </div>
 
-      <OfflineBanner pending={pending} />
+      <OfflineBanner pending={pending} syncing={syncing} />
 
       {/* TABS */}
       <div style={{display:"flex",background:"white",borderBottom:`1px solid ${C.border}`,position:"sticky",top:52,zIndex:90}}>
@@ -1957,12 +1958,12 @@ export default function CrisisVE() {
 
       {/* CONTENT */}
       <div style={{padding:"14px 14px 100px"}}>
-        {tab==="personas"    && <PersonasSection    online={online} onToast={onToast} />}
-        {tab==="zonas"       && <ZonasSection       online={online} onToast={onToast} />}
-        {tab==="refugios"    && <RefugiosSection    online={online} onToast={onToast} />}
-        {tab==="mascotas"    && <MascotasSection    online={online} onToast={onToast} />}
-        {tab==="voluntarios" && <VoluntariosSection online={online} onToast={onToast} />}
-        {tab==="donaciones"  && <DonacionesSection  online={online} onToast={onToast} />}
+        {tab==="personas"    && <PersonasSection    online={online} onToast={onToast} dataVersion={dataVersion} />}
+        {tab==="zonas"       && <ZonasSection       online={online} onToast={onToast} dataVersion={dataVersion} />}
+        {tab==="refugios"    && <RefugiosSection    online={online} onToast={onToast} dataVersion={dataVersion} />}
+        {tab==="mascotas"    && <MascotasSection    online={online} onToast={onToast} dataVersion={dataVersion} />}
+        {tab==="voluntarios" && <VoluntariosSection online={online} onToast={onToast} dataVersion={dataVersion} />}
+        {tab==="donaciones"  && <DonacionesSection  online={online} onToast={onToast} dataVersion={dataVersion} />}
       </div>
 
       <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:680,background:"white",borderTop:`1px solid ${C.border}`,padding:"8px 16px",zIndex:80}}>
