@@ -379,6 +379,134 @@ function GPSCoordsLink({ lat, lng }: { lat: number; lng: number }) {
   )
 }
 
+type ReunificacionData = {
+  lleva_nombre: string
+  lleva_cedula: string
+  lleva_parentesco: string
+  lleva_contacto: string
+  destino: string
+  nino_cedula: string
+  observaciones: string
+}
+
+const PARENTESCOS = ['Madre', 'Padre', 'Abuelo/a', 'Abuela/a', 'Tío/a', 'Tía', 'Hermano/a mayor', 'Tutor legal', 'Otro familiar']
+
+function labelEstadoPersona(estado?: string): { label: string; color: string; bg: string } {
+  if (estado === 'resuelto') return { label: 'Resuelto — con familia', color: C.green, bg: C.greenLt }
+  if (estado === 'encontrado') return { label: 'Encontrado/a', color: C.sky, bg: C.skyLt }
+  return { label: 'Buscando familia', color: C.amber, bg: C.amberLt }
+}
+
+async function actualizarPersona(
+  id: string,
+  patch: Record<string, unknown>,
+  online: boolean,
+  onToast: SectionProps['onToast']
+): Promise<BaseRecord | null> {
+  const local = await IDB.get('personas', id)
+  if (!local) return null
+  const updated = { ...local, ...patch }
+  await IDB.put('personas', { ...updated, _off: true })
+
+  const redReal = await hayInternetReal()
+  if (!redReal) {
+    addQ({ table: 'personas', action: 'update', id, patch })
+    onToast('Actualizado en tu teléfono ✓ Se subirá cuando haya internet', 'ok')
+    return updated
+  }
+
+  try {
+    const { error } = await supabase.from('personas').upsert({ id, record: updated })
+    if (error) throw error
+    await IDB.put('personas', { ...updated, _off: false })
+    onToast('Registro actualizado', 'ok')
+    return updated
+  } catch (e) {
+    console.error('actualizarPersona error:', e)
+    addQ({ table: 'personas', action: 'update', id, patch })
+    onToast('Guardado en tu teléfono ✓ Se sincronizará en breve', 'ok')
+    return updated
+  }
+}
+
+function ModalResuelto({
+  persona,
+  onConfirm,
+  onClose,
+}: {
+  persona: BaseRecord
+  onConfirm: (data: ReunificacionData) => void
+  onClose: () => void
+}) {
+  const esNino = String(persona.cat ?? '').startsWith('nino')
+  const [llevaNombre, setLlevaNombre] = useState('')
+  const [llevaCedula, setLlevaCedula] = useState('')
+  const [parentesco, setParentesco] = useState('')
+  const [llevaContacto, setLlevaContacto] = useState('')
+  const [destino, setDestino] = useState('')
+  const [ninoCedula, setNinoCedula] = useState('')
+  const [obs, setObs] = useState('')
+
+  const confirm = () => {
+    if (!llevaNombre.trim() || !llevaCedula.trim() || !parentesco || !destino.trim()) return
+    onConfirm({
+      lleva_nombre: llevaNombre.trim(),
+      lleva_cedula: llevaCedula.trim(),
+      lleva_parentesco: parentesco,
+      lleva_contacto: llevaContacto.trim(),
+      destino: destino.trim(),
+      nino_cedula: ninoCedula.trim(),
+      observaciones: obs.trim(),
+    })
+  }
+
+  const ok = llevaNombre.trim() && llevaCedula.trim() && parentesco && destino.trim()
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 9999, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div style={{ background: 'white', borderRadius: '20px 20px 0 0', padding: 24, width: '100%', maxWidth: 680, maxHeight: '92vh', overflowY: 'auto', boxShadow: '0 -4px 30px rgba(0,0,0,0.2)' }}>
+        <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 4, color: C.green }}>✓ Resuelto — con familia</div>
+        <p style={{ margin: '0 0 16px', fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
+          {esNino ? `Registra con quién se va ${persona.nombre} y a dónde. Obligatorio para organización de niños.` : `Registra con quién se va ${persona.nombre} y su destino.`}
+        </p>
+
+        <Field label="Nombre de quien se lo lleva *">
+          <Input value={llevaNombre} onChange={setLlevaNombre} placeholder="Nombre completo del familiar o tutor" />
+        </Field>
+        <Field label="Cédula de quien se lo lleva *">
+          <Input value={llevaCedula} onChange={setLlevaCedula} placeholder="Ej: V-12.345.678" />
+        </Field>
+        <Field label="Parentesco / relación *">
+          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+            {PARENTESCOS.map((p) => (
+              <Chip key={p} label={p} active={parentesco === p} onClick={() => setParentesco(p)} color={C.green} />
+            ))}
+          </div>
+        </Field>
+        <Field label="Teléfono de quien se lo lleva">
+          <Input value={llevaContacto} onChange={setLlevaContacto} placeholder="+58 414-000-0000" />
+        </Field>
+        <Field label="¿A dónde van? (destino) *">
+          <Input value={destino} onChange={setDestino} placeholder="Dirección, refugio, ciudad — sé específico" />
+        </Field>
+        {esNino && (
+          <Field label="Cédula del niño/a (si la tienes)">
+            <Input value={ninoCedula} onChange={setNinoCedula} placeholder="Ej: V-00.000.000" />
+          </Field>
+        )}
+        <Field label="Observaciones">
+          <Textarea value={obs} onChange={setObs} placeholder="Ej: Van en camioneta blanca, placa…" rows={2} />
+        </Field>
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+          <Btn onClick={onClose} color={C.muted} outline full small>Cancelar</Btn>
+          <Btn onClick={confirm} full color={C.green} disabled={!ok}>✓ Confirmar — RESUELTO</Btn>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ============================================================
 // PERSONAS
 // ============================================================
@@ -392,6 +520,7 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
   const [estF, setEstF] = useState("todos");
   const [saving, setSaving] = useState(false);
   const [compartir, setCompartir] = useState<BaseRecord | null>(null);
+  const [showResuelto, setShowResuelto] = useState(false);
   const [f, setF] = useState({ nombre:"",edad:"",cat:"nino_sano",hospital:"",sala:"",ubicacion:"",pais:"Venezuela",descripcion:"",contactoNombre:"",contacto:"",lat:null as number | null,lng:null as number | null });
 
   const reload = useCallback(async () => setItems(await IDB.getAll("personas")), []);
@@ -479,51 +608,105 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
   };
 
   const markFound = async (id: string) => {
-    await IDB.patch("personas", id, { estado:"encontrado" });
-    if (!online) addQ({ table:"personas", action:"update", id, patch:{ estado:"encontrado" } });
-    await reload();
-    if (sel?.id===id) setSel(s=>s ? ({...s,estado:"encontrado"} as BaseRecord) : s);
-    onToast("Marcado como encontrado/a","ok");
-  };
+    const updated = await actualizarPersona(id, { estado: 'encontrado', encontrado_ts: now() }, online, onToast)
+    await reload()
+    if (sel?.id === id && updated) setSel(updated)
+  }
+
+  const guardarResuelto = async (data: ReunificacionData) => {
+    if (!sel) return
+    const patch = {
+      estado: 'resuelto',
+      resuelto_ts: now(),
+      lleva_nombre: data.lleva_nombre,
+      lleva_cedula: data.lleva_cedula,
+      lleva_parentesco: data.lleva_parentesco,
+      lleva_contacto: data.lleva_contacto,
+      destino: data.destino,
+      nino_cedula: data.nino_cedula,
+      resuelto_obs: data.observaciones,
+    }
+    const updated = await actualizarPersona(sel.id, patch, online, onToast)
+    setShowResuelto(false)
+    await reload()
+    if (updated) setSel(updated)
+  }
 
   const list = items.filter((p: BaseRecord) => {
-    const mq = !q || [p.nombre,p.ubicacion,p.hospital].filter(Boolean).some(s=>s.toLowerCase().includes(q.toLowerCase()));
-    return mq && (catF==="todos"||p.cat===catF) && (estF==="todos"||p.estado===estF);
+    const mq = !q || [p.nombre,p.ubicacion,p.hospital,p.lleva_nombre].filter(Boolean).some(s=>String(s).toLowerCase().includes(q.toLowerCase()));
+    const est = p.estado || 'buscando'
+    const matchEst = estF === 'todos' || est === estF || (estF === 'buscando' && est === 'buscando')
+    return mq && (catF==="todos"||p.cat===catF) && matchEst
   });
 
   // DETAIL
   if (view==="detail" && sel) {
     const cat = PERSONA_CATS.find(c=>c.id===sel.cat)||PERSONA_CATS[0];
+    const est = labelEstadoPersona(sel.estado)
+    const esNino = String(sel.cat ?? '').startsWith('nino')
+    const resuelto = sel.estado === 'resuelto'
     return (
       <div>
-        <Back onClick={()=>{ setSel(null); setView("list"); }} />
+        <Back onClick={()=>{ setSel(null); setView("list"); setShowResuelto(false); }} />
         <Card>
           {sel.foto ? <img src={sel.foto} alt={sel.nombre} style={{width:"100%",maxHeight:240,objectFit:"cover",borderRadius:12,marginBottom:14}} /> : <div style={{background:cat.bg,height:80,borderRadius:12,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:700,color:cat.color,marginBottom:14,padding:12,textAlign:"center"}}>{cat.label}</div>}
           <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
-            <Pill label={sel.estado==="encontrado"?"Encontrado/a":"Buscando familia"} color={sel.estado==="encontrado"?C.green:C.amber} bg={sel.estado==="encontrado"?C.greenLt:C.amberLt} />
+            <Pill label={est.label} color={est.color} bg={est.bg} />
             <Pill label={cat.label} color={cat.color} bg={cat.bg} />
           </div>
           <h2 style={{margin:"0 0 6px",fontSize:20,fontWeight:800}}>{sel.nombre}</h2>
           {sel.edad && <p style={{margin:"0 0 3px",fontSize:13,color:C.muted}}>{sel.edad}</p>}
+          {sel.nino_cedula && <p style={{margin:"0 0 3px",fontSize:13,color:C.txt,fontWeight:600}}>Cédula: {sel.nino_cedula}</p>}
           {sel.hospital && <p style={{margin:"0 0 3px",fontSize:13,color:C.sky,fontWeight:600}}>{sel.hospital}{sel.sala?` — ${sel.sala}`:""}</p>}
           {sel.ubicacion && <p style={{margin:"0 0 3px",fontSize:13,color:C.muted}}>{sel.ubicacion}, {sel.pais}</p>}
           {sel.descripcion && <div style={{background:C.bg,borderRadius:10,padding:12,margin:"12px 0",fontSize:13,lineHeight:1.6}}>{sel.descripcion}</div>}
           {sel.lat && sel.lng && <GPSCoordsLink lat={sel.lat} lng={sel.lng} />}
+
+          {resuelto && (
+            <div style={{ background: C.greenLt, border: `2px solid ${C.green}`, borderRadius: 12, padding: 14, marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 900, color: C.green, marginBottom: 10, textTransform: 'uppercase' }}>Reunificación registrada</div>
+              <p style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 800 }}>{sel.lleva_nombre}</p>
+              <p style={{ margin: '0 0 4px', fontSize: 13 }}>Cédula: <strong>{sel.lleva_cedula}</strong></p>
+              <p style={{ margin: '0 0 4px', fontSize: 13 }}>Parentesco: <strong>{sel.lleva_parentesco}</strong></p>
+              {sel.lleva_contacto && <p style={{ margin: '0 0 4px', fontSize: 13 }}>Teléfono: {sel.lleva_contacto}</p>}
+              <p style={{ margin: '0 0 4px', fontSize: 13 }}>Destino: <strong>{sel.destino}</strong></p>
+              {sel.resuelto_obs && <p style={{ margin: '8px 0 0', fontSize: 12, color: C.muted }}>{sel.resuelto_obs}</p>}
+              {sel.resuelto_ts && <p style={{ margin: '8px 0 0', fontSize: 11, color: C.muted }}>Registrado: {fmtDate(sel.resuelto_ts)}</p>}
+            </div>
+          )}
+
           <div style={{borderTop:`1px solid ${C.border}`,paddingTop:14,marginTop:6}}>
             <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",marginBottom:6}}>Reportado por</div>
             {sel.contactoNombre && <p style={{margin:"0 0 2px",fontWeight:700,fontSize:14}}>{sel.contactoNombre}</p>}
             <p style={{margin:"0 0 14px",fontSize:15,fontWeight:800,color:C.primary}}>{sel.contacto}</p>
           </div>
-          {sel.estado!=="encontrado"
-            ? <Btn onClick={()=>markFound(sel.id)} color={C.green} full> Marcar como ENCONTRADO/A</Btn>
-            : <div style={{textAlign:"center",padding:14,background:C.greenLt,borderRadius:10,fontWeight:700,color:C.green}}>¡Ya fue encontrado/a!</div>
-          }
+
+          {!resuelto && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <Btn onClick={() => setShowResuelto(true)} color={C.green} full>
+                {esNino ? '✓ RESUELTO — va con familia' : '✓ RESUELTO — registrado con familiar'}
+              </Btn>
+              {sel.estado !== 'encontrado' && (
+                <Btn onClick={() => markFound(sel.id)} color={C.sky} outline full small>
+                  Solo marcar encontrado/a (sin datos de familia)
+                </Btn>
+              )}
+            </div>
+          )}
+          {resuelto && (
+            <div style={{ textAlign: 'center', padding: 14, background: C.greenLt, borderRadius: 10, fontWeight: 800, color: C.green }}>
+              ✓ Caso resuelto — organizado con familia
+            </div>
+          )}
           <div style={{ marginTop: 14 }}>
             <Btn outline color={C.red} full onClick={() => setCompartir(sel)}>
               📱 Enviar SMS a coordinación
             </Btn>
           </div>
         </Card>
+        {showResuelto && (
+          <ModalResuelto persona={sel} onConfirm={guardarResuelto} onClose={() => setShowResuelto(false)} />
+        )}
         {compartir && (
           <CompartirSinInternet item={compartir} onClose={() => setCompartir(null)} onToast={onToast} />
         )}
@@ -595,8 +778,10 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
   }
 
   // LIST
-  const buscando=items.filter((p: BaseRecord)=>p.estado!=="encontrado").length;
-  const enc=items.filter((p: BaseRecord)=>p.estado==="encontrado").length;
+  const buscando = items.filter((p: BaseRecord) => !['encontrado', 'resuelto'].includes(String(p.estado))).length
+  const resueltos = items.filter((p: BaseRecord) => p.estado === 'resuelto').length
+  const ninos = items.filter((p: BaseRecord) => p.cat?.startsWith('nino')).length
+  const ninosResueltos = items.filter((p: BaseRecord) => p.cat?.startsWith('nino') && p.estado === 'resuelto').length
 
   return (
     <div>
@@ -607,9 +792,9 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
       )}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
         <StatBox n={buscando} label="Buscando familia" color={C.amber} />
-        <StatBox n={enc} label="Personas reunidas" color={C.green} />
-        <StatBox n={items.filter((p: BaseRecord)=>p.cat?.startsWith("nino")).length} label="Niños" color={C.sky} />
-        <StatBox n={items.filter((p: BaseRecord)=>p.cat?.endsWith("hospital")).length} label="En hospitales" color={C.primary} />
+        <StatBox n={resueltos} label="Resueltos — con familia" color={C.green} />
+        <StatBox n={ninos} label="Niños reportados" color={C.sky} />
+        <StatBox n={ninosResueltos} label="Niños resueltos" color={C.teal} />
       </div>
       <div style={{display:"flex",gap:8,marginBottom:10}}>
         <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Nombre, lugar, hospital…" style={{flex:1,padding:"10px 12px",borderRadius:8,border:`1.5px solid ${C.border}`,fontSize:13,outline:"none"}} />
@@ -619,25 +804,29 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
         <Chip label="Todos" active={catF==="todos"} onClick={()=>setCatF("todos")} />
         {PERSONA_CATS.map(c=><Chip key={c.id} label={c.label} active={catF===c.id} onClick={()=>setCatF(c.id)} color={c.color} />)}
       </div>
-      <div style={{display:"flex",gap:5,marginBottom:14}}>
+      <div style={{display:"flex",gap:5,marginBottom:14,flexWrap:"wrap"}}>
         <Chip label="Todos" active={estF==="todos"} onClick={()=>setEstF("todos")} />
         <Chip label="Buscando" active={estF==="buscando"} onClick={()=>setEstF("buscando")} color={C.amber} />
-        <Chip label="Encontrados" active={estF==="encontrado"} onClick={()=>setEstF("encontrado")} color={C.green} />
+        <Chip label="Encontrados" active={estF==="encontrado"} onClick={()=>setEstF("encontrado")} color={C.sky} />
+        <Chip label="Resueltos" active={estF==="resuelto"} onClick={()=>setEstF("resuelto")} color={C.green} />
       </div>
       {list.length===0 ? <Empty icon={null} msg={items.length===0?"Sin reportes aún":"Sin resultados"} /> : list.map((p: BaseRecord)=>{
         const cat=PERSONA_CATS.find(c=>c.id===p.cat)||PERSONA_CATS[0];
+        const est = labelEstadoPersona(p.estado)
+        const borderColor = p.estado === 'resuelto' ? C.green : p.estado === 'encontrado' ? C.sky : cat.color
         return (
-          <div key={p.id} onClick={()=>{ setSel(p); setView("detail"); }} style={{background:"white",borderRadius:12,marginBottom:10,overflow:"hidden",display:"flex",cursor:"pointer",borderLeft:`4px solid ${p.estado==="encontrado"?C.green:cat.color}`,opacity:p.estado==="encontrado"?.72:1,boxShadow:"0 1px 3px rgba(0,0,0,0.07)"}}>
+          <div key={p.id} onClick={()=>{ setSel(p); setView("detail"); }} style={{background:"white",borderRadius:12,marginBottom:10,overflow:"hidden",display:"flex",cursor:"pointer",borderLeft:`4px solid ${borderColor}`,opacity:p.estado==="resuelto"?.85:1,boxShadow:"0 1px 3px rgba(0,0,0,0.07)"}}>
             <div style={{width:76,minHeight:76,background:cat.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,flexShrink:0}}>
               {p.foto?<img src={p.foto} alt="" style={{width:76,height:76,objectFit:"cover"}} />:<span style={{fontSize:11,fontWeight:700,color:cat.color,textAlign:"center",padding:4}}>{cat.label}</span>}
             </div>
             <div style={{padding:"10px 12px",flex:1,minWidth:0}}>
               <div style={{display:"flex",gap:4,marginBottom:4,flexWrap:"wrap"}}>
-                <Pill label={p.estado==="encontrado"?"Encontrado":"Buscando"} color={p.estado==="encontrado"?C.green:C.amber} bg={p.estado==="encontrado"?C.greenLt:C.amberLt} />
+                <Pill label={est.label} color={est.color} bg={est.bg} />
                 <Pill label={cat.label} color={cat.color} bg={cat.bg} />
                 {p._off&&<Pill label="En tu teléfono" color={C.amber} bg={C.amberLt} />}
               </div>
               <div style={{fontWeight:800,fontSize:15,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.nombre}</div>
+              {p.estado==='resuelto' && p.lleva_nombre && <div style={{fontSize:12,color:C.green,fontWeight:600}}>Con: {p.lleva_nombre} → {p.destino}</div>}
               {p.hospital&&<div style={{fontSize:12,color:C.sky,fontWeight:600}}>{p.hospital}</div>}
               {p.ubicacion&&<div style={{fontSize:12,color:C.muted}}>{p.ubicacion}</div>}
               {p.lat&&<div style={{fontSize:11,color:C.teal}}>GPS guardado</div>}

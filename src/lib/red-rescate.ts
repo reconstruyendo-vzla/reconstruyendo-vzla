@@ -187,12 +187,18 @@ export function textoCompartirRegistro(item: BaseRecord): string {
   if (esPersona(item)) {
     const lines = [
       '👤 PERSONA — RECONSTRUYENDO VZLA',
+      item.estado === 'resuelto' ? '✓ RESUELTO — con familia' : '',
       `${CAT_LABEL[String(item.cat)] ?? 'Persona'}: ${item.nombre}`,
       item.edad ? `Edad: ${item.edad}` : '',
+      item.nino_cedula ? `Cédula niño/a: ${item.nino_cedula}` : '',
       item.ubicacion ? `Ubicación: ${item.ubicacion}` : '',
       item.hospital ? `Hospital: ${item.hospital}${item.sala ? ` — ${item.sala}` : ''}` : '',
       item.descripcion ? `Señas: ${item.descripcion}` : '',
-      item.lat != null && item.lng != null ? `Ubicación: https://maps.google.com/?q=${item.lat},${item.lng}` : '',
+      item.lat != null && item.lng != null ? `Ubicación GPS: https://maps.google.com/?q=${item.lat},${item.lng}` : '',
+      item.estado === 'resuelto' && item.lleva_nombre ? `Se va con: ${item.lleva_nombre} (${item.lleva_parentesco ?? ''})` : '',
+      item.estado === 'resuelto' && item.lleva_cedula ? `Cédula quien recoge: ${item.lleva_cedula}` : '',
+      item.estado === 'resuelto' && item.lleva_contacto ? `Tel. familiar: ${item.lleva_contacto}` : '',
+      item.estado === 'resuelto' && item.destino ? `Destino: ${item.destino}` : '',
       `Contacto quien reporta: ${item.contactoNombre ?? ''} ${item.contacto ?? ''}`.trim(),
     ]
     return lines.filter(Boolean).join('\n')
