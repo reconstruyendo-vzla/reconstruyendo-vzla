@@ -90,6 +90,15 @@ export const IDB = {
       req.onerror = () => rej(req.error)
     })
   },
+  async delete(store: StoreName, id: string): Promise<void> {
+    const db = await this.open()
+    return new Promise((res, rej) => {
+      const tx = db.transaction(store, 'readwrite')
+      tx.objectStore(store).delete(id)
+      tx.oncomplete = () => res()
+      tx.onerror = () => rej(tx.error)
+    })
+  },
 }
 
 export function addQ(item: QueueItem) {

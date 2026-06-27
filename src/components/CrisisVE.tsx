@@ -6,6 +6,7 @@ import {
   IDB,
   addQ,
   getQ,
+  setQ,
   type BaseRecord,
   type QueueItem,
   type StoreName,
@@ -429,6 +430,49 @@ async function actualizarPersona(
   }
 }
 
+function quitarPersonaDeCola(id: string) {
+  setQ(
+    getQ().filter((item) => {
+      if (item.table !== 'personas') return true
+      if (item.id === id) return false
+      if (item.data?.id === id) return false
+      return true
+    })
+  )
+}
+
+async function eliminarPersona(
+  id: string,
+  onToast: SectionProps['onToast'],
+  silent = false
+): Promise<boolean> {
+  await IDB.delete('personas', id)
+  quitarPersonaDeCola(id)
+
+  const redReal = await hayInternetReal()
+  if (!redReal) {
+    addQ({ table: 'personas', action: 'delete', id })
+    if (!silent) onToast('Eliminado de tu teléfono', 'ok')
+    return true
+  }
+
+  try {
+    const { error } = await supabase.from('personas').delete().eq('id', id)
+    if (error) throw error
+    if (!silent) onToast('Eliminado de la lista', 'ok')
+    return true
+  } catch (e) {
+    console.error('eliminarPersona error:', e)
+    addQ({ table: 'personas', action: 'delete', id })
+    if (!silent) onToast('Eliminado aquí — se quitará de la red al reconectar', 'ok')
+    return true
+  }
+}
+
+function personaLocalizada(estado?: string): boolean {
+  return estado === 'resuelto' || estado === 'encontrado'
+}
+
 function ModalResuelto({
   persona,
   onConfirm,
@@ -632,6 +676,26 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
     if (updated) setSel(updated)
   }
 
+  const borrarPersona = async (id: string, nombre: string) => {
+    if (!confirm(`¿Eliminar a ${nombre} de la lista?\n\nSolo para casos ya localizados. Los datos ya quedaron registrados.`)) return
+    const ok = await eliminarPersona(id, onToast)
+    if (!ok) return
+    await reload()
+    setSel(null)
+    setView('list')
+  }
+
+  const limpiarLocalizadas = async () => {
+    const candidatos = items.filter((p) => personaLocalizada(String(p.estado)))
+    if (!candidatos.length) return
+    if (!confirm(`¿Limpiar ${candidatos.length} persona(s) ya localizadas de esta lista?\n\nNo borra el historial en el servidor si ya se subió — solo ordena tu pantalla.`)) return
+    for (const p of candidatos) {
+      await eliminarPersona(p.id, onToast, true)
+    }
+    onToast(`${candidatos.length} eliminados — lista actualizada`, 'ok')
+    await reload()
+  }
+
   const list = items.filter((p: BaseRecord) => {
     const mq = !q || [p.nombre,p.ubicacion,p.hospital,p.lleva_nombre].filter(Boolean).some(s=>String(s).toLowerCase().includes(q.toLowerCase()));
     const est = p.estado || 'buscando'
@@ -694,9 +758,20 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
             </div>
           )}
           {resuelto && (
-            <div style={{ textAlign: 'center', padding: 14, background: C.greenLt, borderRadius: 10, fontWeight: 800, color: C.green }}>
+            <div style={{ textAlign: 'center', padding: 14, background: C.greenLt, borderRadius: 10, fontWeight: 800, color: C.green, marginBottom: 8 }}>
               ✓ Caso resuelto — organizado con familia
             </div>
+          )}
+          {personaLocalizada(String(sel.estado)) && (
+            <Btn
+              onClick={() => borrarPersona(sel.id, String(sel.nombre))}
+              color={C.muted}
+              outline
+              full
+              small
+            >
+              🗑 Eliminar de la lista (ya localizado/a)
+            </Btn>
           )}
           <div style={{ marginTop: 14 }}>
             <Btn outline color={C.red} full onClick={() => setCompartir(sel)}>
@@ -782,12 +857,23 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
   const resueltos = items.filter((p: BaseRecord) => p.estado === 'resuelto').length
   const ninos = items.filter((p: BaseRecord) => p.cat?.startsWith('nino')).length
   const ninosResueltos = items.filter((p: BaseRecord) => p.cat?.startsWith('nino') && p.estado === 'resuelto').length
+  const localizadas = items.filter((p: BaseRecord) => personaLocalizada(String(p.estado))).length
 
   return (
     <div>
       {!online && (
         <div style={{background:C.redLt,border:`1px solid ${C.red}`,borderRadius:12,padding:12,marginBottom:12,fontSize:13,lineHeight:1.5}}>
           <strong style={{color:C.red}}>Sin internet:</strong> guarda el reporte aquí y luego toca <strong>Enviar SMS</strong> para avisar a coordinación.
+        </div>
+      )}
+      {localizadas > 0 && (
+        <div style={{ background: 'white', border: `1px solid ${C.border}`, borderRadius: 12, padding: 12, marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+          <span style={{ fontSize: 13, color: C.muted, lineHeight: 1.4 }}>
+            <strong style={{ color: C.txt }}>{localizadas}</strong> ya localizadas en la lista
+          </span>
+          <Btn small onClick={limpiarLocalizadas} color={C.muted}>
+            Limpiar lista
+          </Btn>
         </div>
       )}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
@@ -831,6 +917,29 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
               {p.ubicacion&&<div style={{fontSize:12,color:C.muted}}>{p.ubicacion}</div>}
               {p.lat&&<div style={{fontSize:11,color:C.teal}}>GPS guardado</div>}
             </div>
+            {personaLocalizada(String(p.estado)) && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  borrarPersona(p.id, String(p.nombre))
+                }}
+                style={{
+                  alignSelf: 'center',
+                  marginRight: 10,
+                  background: C.bg,
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 8,
+                  padding: '8px 10px',
+                  fontSize: 16,
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                }}
+                title="Eliminar de la lista"
+              >
+                🗑
+              </button>
+            )}
           </div>
         );
       })}

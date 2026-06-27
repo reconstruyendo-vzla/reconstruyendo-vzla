@@ -100,6 +100,12 @@ export async function syncFromSupabase(): Promise<number> {
 async function publicarItem(item: QueueItem): Promise<void> {
   if (!isSupabaseTable(item.table)) return
 
+  if (item.action === 'delete' && item.id) {
+    const { error } = await supabase.from(item.table).delete().eq('id', item.id)
+    if (error) throw error
+    return
+  }
+
   if (item.action === 'update' && item.id && item.patch) {
     const local = await IDB.get(item.table, item.id)
     const base = local || (item.data as BaseRecord | undefined)
