@@ -147,10 +147,10 @@ const TABS = [
 ];
 
 const PERSONA_CATS = [
-  { id:"nino_sano",      label:"Niño sano",        icon:"🧒", color:C.green,   bg:C.greenLt },
-  { id:"nino_hospital",  label:"Niño en hospital",  icon:"🏥", color:C.sky,     bg:C.skyLt },
-  { id:"adulto_sano",    label:"Adulto sano",       icon:"🧑", color:C.teal,    bg:C.tealLt },
-  { id:"adulto_hospital",label:"Adulto en hospital",icon:"🏥", color:C.primary, bg:C.primaryLt },
+  { id:"nino_sano",      label:"Niño sano",        color:C.green,   bg:C.greenLt },
+  { id:"nino_hospital",  label:"Niño en hospital",  color:C.sky,     bg:C.skyLt },
+  { id:"adulto_sano",    label:"Adulto sano",       color:C.teal,    bg:C.tealLt },
+  { id:"adulto_hospital",label:"Adulto en hospital",color:C.primary, bg:C.primaryLt },
 ];
 
 const INSUMOS  = ["Agua","Alimentos","Medicamentos","Ropa","Frazadas","Pañales","Equipo médico","Combustible","Linternas","Herramientas","Otro"];
@@ -158,13 +158,13 @@ const AYUDA    = ["Rescate","Atención médica","Transporte","Alojamiento","Comu
 const PERSONAL = ["Médico/a","Enfermero/a","Paramédico","Rescatista","Psicólogo/a","Conductor/a","Bombero/a","Trabajador social","Voluntario general"];
 const ESPECIALIDADES = ["Médico/a","Enfermero/a","Paramédico","Rescatista","Psicólogo/a","Ingeniero/a","Trabajador social","Abogado/a","Conductor/a","Piloto","Comunicaciones","Bombero/a","Voluntario general"];
 const MASCOTA_CATS = [
-  { id:"sana",   label:"Sana / encontrada", icon:"🐶", color:C.green, bg:C.greenLt },
-  { id:"herida", label:"Necesita atención", icon:"🩹", color:C.amber, bg:C.amberLt },
+  { id:"sana",   label:"Sana / encontrada", color:C.green, bg:C.greenLt },
+  { id:"herida", label:"Necesita atención", color:C.amber, bg:C.amberLt },
 ];
 const URGENCIAS = [
-  { id:"critica", label:"🚨 Crítica", statLabel:"Zona crítica", color:C.amber,   bg:C.amberLt },
-  { id:"alta",    label:"⚡ Alta",    statLabel:"Zona alta",    color:C.sky,     bg:C.skyLt },
-  { id:"media",   label:"📋 Media",   statLabel:"Zona media",   color:C.teal,    bg:C.tealLt },
+  { id:"critica", label:"Crítica", statLabel:"Zona crítica", color:C.amber,   bg:C.amberLt },
+  { id:"alta",    label:"Alta",    statLabel:"Zona alta",    color:C.sky,     bg:C.skyLt },
+  { id:"media",   label:"Media",   statLabel:"Zona media",   color:C.teal,    bg:C.tealLt },
 ];
 
 const REMOTE_ESPECIALIDADES = ["Psicólogo/a", "Abogado/a", "Médico/a"];
@@ -197,7 +197,7 @@ function PhotoUpload({preview,onFile,label="Subir foto"}:{preview:string|null;on
   return (
     <div style={{textAlign:"center",marginBottom:14}}>
       <div onClick={()=>ref.current?.click()} style={{width:88,height:88,borderRadius:12,margin:"0 auto 6px",background:preview?"transparent":C.primaryLt,border:`2px dashed ${C.primaryMd}`,cursor:"pointer",overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center",fontSize:28}}>
-        {preview ? <img src={preview} style={{width:"100%",height:"100%",objectFit:"cover"}} alt="" /> : "📷"}
+        {preview ? <img src={preview} style={{width:"100%",height:"100%",objectFit:"cover"}} alt="" /> : ""}
       </div>
       <input ref={ref} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={async e=>{ const file=e.target.files?.[0]; if(file) onFile(await toB64(file)); }} />
       <span style={{fontSize:11,color:C.muted,cursor:"pointer"}} onClick={()=>ref.current?.click()}>{preview?"Cambiar foto":label}</span>
@@ -207,7 +207,7 @@ function PhotoUpload({preview,onFile,label="Subir foto"}:{preview:string|null;on
 
 function OfflineBanner({pending}:{pending:number}){
   if(!pending) return null;
-  return <div style={{background:C.amberLt,borderBottom:`1px solid ${C.amber}`,padding:"8px 16px",fontSize:12,fontWeight:600,color:C.amber,textAlign:"center"}}>📴 Sin conexión — {pending} reporte{pending>1?"s":""} guardado{pending>1?"s":""} localmente. Se sincronizarán cuando vuelva el internet.</div>;
+  return <div style={{background:C.amberLt,borderBottom:`1px solid ${C.amber}`,padding:"8px 16px",fontSize:12,fontWeight:600,color:C.amber,textAlign:"center"}}>Sin conexión — {pending} reporte{pending>1?"s":""} guardado{pending>1?"s":""} localmente. Se sincronizarán cuando vuelva el internet.</div>;
 }
 
 // ============================================================
@@ -233,7 +233,7 @@ function MapPicker({ lat, lng, onPin, readOnly = false, height = 280 }: { lat?: 
       // OSM tiles — se cachean via service worker en producción
       Lf.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 19,
-        attribution: "© OpenStreetMap"
+        attribution: "OpenStreetMap"
       }).addTo(map);
 
       map.setView([startLat, startLng], lat ? 15 : 10);
@@ -253,7 +253,7 @@ function MapPicker({ lat, lng, onPin, readOnly = false, height = 280 }: { lat?: 
         const gpsBtn = Lf.control({ position: "topleft" });
         gpsBtn.onAdd = () => {
           const btn = Lf.DomUtil.create("button");
-          btn.innerHTML = "📍";
+          btn.innerHTML = "";
           btn.title = "Mi ubicación";
           btn.style.cssText = `background:white;border:2px solid ${C.border};border-radius:8px;padding:6px 8px;font-size:16px;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.15)`;
           btn.onclick = (e) => {
@@ -287,11 +287,11 @@ function MapPicker({ lat, lng, onPin, readOnly = false, height = 280 }: { lat?: 
   return (
     <div style={{ borderRadius: 12, overflow: "hidden", border: `1.5px solid ${C.border}`, position: "relative" }}>
       {loading && <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", background: C.primaryLt, fontSize: 14, color: C.muted }}>Cargando mapa…</div>}
-      {error && <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", background: C.primaryLt, fontSize: 13, color: C.muted, flexDirection:"column", gap:8 }}><span style={{fontSize:32}}>🗺️</span>Mapa no disponible sin internet.<br/>La ubicación GPS se guardó igual.</div>}
+      {error && <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", background: C.primaryLt, fontSize: 13, color: C.muted, flexDirection:"column", gap:8 }}><span style={{fontSize:32}}></span>Mapa no disponible sin internet.<br/>La ubicación GPS se guardó igual.</div>}
       <div ref={mapRef} style={{ height: loading || error ? 0 : height, width: "100%" }} />
       {!readOnly && !loading && !error && (
         <div style={{ position: "absolute", bottom: 8, left: 0, right: 0, textAlign: "center", pointerEvents: "none" }}>
-          <span style={{ background: "rgba(255,255,255,0.92)", fontSize: 11, fontWeight: 600, color: C.muted, padding: "4px 10px", borderRadius: 20 }}>Toca el mapa para marcar la ubicación exacta · 📍 para usar tu GPS</span>
+          <span style={{ background: "rgba(255,255,255,0.92)", fontSize: 11, fontWeight: 600, color: C.muted, padding: "4px 10px", borderRadius: 20 }}>Toca el mapa para marcar la ubicación exacta · para usar tu GPS</span>
         </div>
       )}
     </div>
@@ -305,7 +305,7 @@ function MapView({ lat, lng, label }: { lat: number; lng: number; label?: string
     <div style={{ marginBottom: 16 }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: "uppercase", marginBottom: 6 }}>Ubicación en mapa</div>
       <MapPicker lat={lat} lng={lng} readOnly height={220} />
-      <div style={{ fontSize: 12, color: C.muted, marginTop: 6 }}>📍 {lat.toFixed(5)}, {lng.toFixed(5)}{label ? ` — ${label}` : ""}</div>
+      <div style={{ fontSize: 12, color: C.muted, marginTop: 6 }}>{lat.toFixed(5)}, {lng.toFixed(5)}{label ? ` — ${label}` : ""}</div>
     </div>
   );
 }
@@ -327,13 +327,13 @@ function PersonasSection({ online, onToast }: SectionProps) {
   useEffect(() => { reload(); }, [reload]);
 
   const save = async () => {
-    if (!f.nombre || !f.contacto) { onToast("⚠ Nombre y contacto son obligatorios","warn"); return; }
+    if (!f.nombre || !f.contacto) { onToast("Nombre y contacto son obligatorios","warn"); return; }
     const item = { ...f, foto, estado:"buscando", id:uid(), ts:now(), _off:!online };
     await IDB.put("personas", item);
     if (!online) addQ({ table:"personas", action:"insert", data:item });
     await reload(); setView("list"); setFoto(null);
     setF({ nombre:"",edad:"",cat:"nino_sano",hospital:"",sala:"",ubicacion:"",pais:"Venezuela",descripcion:"",contactoNombre:"",contacto:"",lat:null as number | null,lng:null as number | null });
-    onToast(online ? "✓ Reporte publicado" : "💾 Guardado sin internet — se publicará automáticamente", online?"ok":"warn");
+    onToast(online ? "Reporte publicado" : "Guardado sin internet — se publicará automáticamente", online?"ok":"warn");
   };
 
   const markFound = async (id: string) => {
@@ -341,7 +341,7 @@ function PersonasSection({ online, onToast }: SectionProps) {
     if (!online) addQ({ table:"personas", action:"update", id, patch:{ estado:"encontrado" } });
     await reload();
     if (sel?.id===id) setSel(s=>s ? ({...s,estado:"encontrado"} as BaseRecord) : s);
-    onToast("✓ Marcado como encontrado/a","ok");
+    onToast("Marcado como encontrado/a","ok");
   };
 
   const list = items.filter((p: BaseRecord) => {
@@ -356,15 +356,15 @@ function PersonasSection({ online, onToast }: SectionProps) {
       <div>
         <Back onClick={()=>{ setSel(null); setView("list"); }} />
         <Card>
-          {sel.foto ? <img src={sel.foto} alt={sel.nombre} style={{width:"100%",maxHeight:240,objectFit:"cover",borderRadius:12,marginBottom:14}} /> : <div style={{background:cat.bg,height:80,borderRadius:12,display:"flex",alignItems:"center",justifyContent:"center",fontSize:40,marginBottom:14}}>{cat.icon}</div>}
+          {sel.foto ? <img src={sel.foto} alt={sel.nombre} style={{width:"100%",maxHeight:240,objectFit:"cover",borderRadius:12,marginBottom:14}} /> : <div style={{background:cat.bg,height:80,borderRadius:12,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:700,color:cat.color,marginBottom:14,padding:12,textAlign:"center"}}>{cat.label}</div>}
           <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
-            <Pill label={sel.estado==="encontrado"?"✓ Encontrado/a":"Buscando familia"} color={sel.estado==="encontrado"?C.green:C.amber} bg={sel.estado==="encontrado"?C.greenLt:C.amberLt} />
+            <Pill label={sel.estado==="encontrado"?"Encontrado/a":"Buscando familia"} color={sel.estado==="encontrado"?C.green:C.amber} bg={sel.estado==="encontrado"?C.greenLt:C.amberLt} />
             <Pill label={cat.label} color={cat.color} bg={cat.bg} />
           </div>
           <h2 style={{margin:"0 0 6px",fontSize:20,fontWeight:800}}>{sel.nombre}</h2>
-          {sel.edad && <p style={{margin:"0 0 3px",fontSize:13,color:C.muted}}>🎂 {sel.edad}</p>}
-          {sel.hospital && <p style={{margin:"0 0 3px",fontSize:13,color:C.sky,fontWeight:600}}>🏥 {sel.hospital}{sel.sala?` — ${sel.sala}`:""}</p>}
-          {sel.ubicacion && <p style={{margin:"0 0 3px",fontSize:13,color:C.muted}}>📍 {sel.ubicacion}, {sel.pais}</p>}
+          {sel.edad && <p style={{margin:"0 0 3px",fontSize:13,color:C.muted}}>{sel.edad}</p>}
+          {sel.hospital && <p style={{margin:"0 0 3px",fontSize:13,color:C.sky,fontWeight:600}}>{sel.hospital}{sel.sala?` — ${sel.sala}`:""}</p>}
+          {sel.ubicacion && <p style={{margin:"0 0 3px",fontSize:13,color:C.muted}}>{sel.ubicacion}, {sel.pais}</p>}
           {sel.descripcion && <div style={{background:C.bg,borderRadius:10,padding:12,margin:"12px 0",fontSize:13,lineHeight:1.6}}>{sel.descripcion}</div>}
           {sel.lat && sel.lng && <MapView lat={sel.lat} lng={sel.lng} label={sel.ubicacion} />}
           <div style={{borderTop:`1px solid ${C.border}`,paddingTop:14,marginTop:6}}>
@@ -372,8 +372,8 @@ function PersonasSection({ online, onToast }: SectionProps) {
             <p style={{margin:"0 0 14px",fontSize:15,fontWeight:800,color:C.primary}}>{sel.contacto}</p>
           </div>
           {sel.estado!=="encontrado"
-            ? <Btn onClick={()=>markFound(sel.id)} color={C.green} full>✓ Marcar como ENCONTRADO/A</Btn>
-            : <div style={{textAlign:"center",padding:14,background:C.greenLt,borderRadius:10,fontWeight:700,color:C.green}}>🎉 ¡Ya fue encontrado/a!</div>
+            ? <Btn onClick={()=>markFound(sel.id)} color={C.green} full> Marcar como ENCONTRADO/A</Btn>
+            : <div style={{textAlign:"center",padding:14,background:C.greenLt,borderRadius:10,fontWeight:700,color:C.green}}>¡Ya fue encontrado/a!</div>
           }
         </Card>
       </div>
@@ -388,12 +388,12 @@ function PersonasSection({ online, onToast }: SectionProps) {
         <Back onClick={()=>setView("list")} />
         <Card>
           <h3 style={{margin:"0 0 4px",fontWeight:800}}>Reportar Persona</h3>
-          <p style={{margin:"0 0 14px",fontSize:12,color:C.muted}}>{online?"Los datos se publican al instante":"📴 Sin internet — se guardará y publicará automáticamente cuando vuelva la conexión"}</p>
+          <p style={{margin:"0 0 14px",fontSize:12,color:C.muted}}>{online?"Los datos se publican al instante":"Sin internet — se guardará y publicará automáticamente cuando vuelva la conexión"}</p>
           <PhotoUpload preview={foto} onFile={setFoto} label="Foto de la persona" />
           <Field label="Categoría">
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
               {PERSONA_CATS.map(c=>(
-                <button key={c.id} onClick={()=>setF(x=>({...x,cat:c.id}))} style={{padding:"8px",borderRadius:8,border:`2px solid ${f.cat===c.id?c.color:C.border}`,background:f.cat===c.id?c.bg:"white",color:f.cat===c.id?c.color:C.muted,fontWeight:700,fontSize:12,cursor:"pointer",display:"flex",gap:4,alignItems:"center",justifyContent:"center"}}>{c.icon} {c.label}</button>
+                <button key={c.id} onClick={()=>setF(x=>({...x,cat:c.id}))} style={{padding:"8px",borderRadius:8,border:`2px solid ${f.cat===c.id?c.color:C.border}`,background:f.cat===c.id?c.bg:"white",color:f.cat===c.id?c.color:C.muted,fontWeight:700,fontSize:12,cursor:"pointer",display:"flex",gap:4,alignItems:"center",justifyContent:"center"}}>{c.label}</button>
               ))}
             </div>
           </Field>
@@ -407,12 +407,12 @@ function PersonasSection({ online, onToast }: SectionProps) {
           <Field label="País"><Input value={f.pais} onChange={v=>setF(x=>({...x,pais:v}))} placeholder="Venezuela" /></Field>
           <Field label="Pinear ubicación exacta en el mapa">
             <MapPicker lat={f.lat} lng={f.lng} onPin={(la,ln)=>setF(x=>({...x,lat:la,lng:ln}))} />
-            {f.lat != null && f.lng != null && <p style={{fontSize:11,color:C.green,marginTop:4,fontWeight:600}}>✓ Ubicación marcada: {f.lat.toFixed(4)}, {f.lng.toFixed(4)}</p>}
+            {f.lat != null && f.lng != null && <p style={{fontSize:11,color:C.green,marginTop:4,fontWeight:600}}> Ubicación marcada: {f.lat.toFixed(4)}, {f.lng.toFixed(4)}</p>}
           </Field>
           <Field label="Descripción (ropa, señas, situación)"><Textarea value={f.descripcion} onChange={v=>setF(x=>({...x,descripcion:v}))} placeholder="Camisa azul, cabello corto…" /></Field>
           <Field label="Tu nombre (quien reporta)"><Input value={f.contactoNombre} onChange={v=>setF(x=>({...x,contactoNombre:v}))} placeholder="Ej: Carlos Martínez" /></Field>
           <Field label="Contacto (WhatsApp / @usuario) *"><Input value={f.contacto} onChange={v=>setF(x=>({...x,contacto:v}))} placeholder="+58 414-000-0000 / @usuario" /></Field>
-          <Btn onClick={save} full>{online?"Publicar Reporte":"💾 Guardar sin internet"}</Btn>
+          <Btn onClick={save} full>{online?"Publicar Reporte":"Guardar sin internet"}</Btn>
         </Card>
       </div>
     );
@@ -430,35 +430,35 @@ function PersonasSection({ online, onToast }: SectionProps) {
         <StatBox n={items.filter((p: BaseRecord)=>p.cat?.endsWith("hospital")).length} label="En hospitales" color={C.primary} />
       </div>
       <div style={{display:"flex",gap:8,marginBottom:10}}>
-        <input value={q} onChange={e=>setQ(e.target.value)} placeholder="🔍 Nombre, lugar, hospital…" style={{flex:1,padding:"10px 12px",borderRadius:8,border:`1.5px solid ${C.border}`,fontSize:13,outline:"none"}} />
+        <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Nombre, lugar, hospital…" style={{flex:1,padding:"10px 12px",borderRadius:8,border:`1.5px solid ${C.border}`,fontSize:13,outline:"none"}} />
         <Btn onClick={()=>setView("form")} small>+ Reportar</Btn>
       </div>
       <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:8}}>
         <Chip label="Todos" active={catF==="todos"} onClick={()=>setCatF("todos")} />
-        {PERSONA_CATS.map(c=><Chip key={c.id} label={c.icon+" "+c.label} active={catF===c.id} onClick={()=>setCatF(c.id)} color={c.color} />)}
+        {PERSONA_CATS.map(c=><Chip key={c.id} label={c.label} active={catF===c.id} onClick={()=>setCatF(c.id)} color={c.color} />)}
       </div>
       <div style={{display:"flex",gap:5,marginBottom:14}}>
         <Chip label="Todos" active={estF==="todos"} onClick={()=>setEstF("todos")} />
         <Chip label="Buscando" active={estF==="buscando"} onClick={()=>setEstF("buscando")} color={C.amber} />
-        <Chip label="✓ Encontrados" active={estF==="encontrado"} onClick={()=>setEstF("encontrado")} color={C.green} />
+        <Chip label="Encontrados" active={estF==="encontrado"} onClick={()=>setEstF("encontrado")} color={C.green} />
       </div>
-      {list.length===0 ? <Empty icon="👤" msg={items.length===0?"Sin reportes aún":"Sin resultados"} /> : list.map((p: BaseRecord)=>{
+      {list.length===0 ? <Empty icon={null} msg={items.length===0?"Sin reportes aún":"Sin resultados"} /> : list.map((p: BaseRecord)=>{
         const cat=PERSONA_CATS.find(c=>c.id===p.cat)||PERSONA_CATS[0];
         return (
           <div key={p.id} onClick={()=>{ setSel(p); setView("detail"); }} style={{background:"white",borderRadius:12,marginBottom:10,overflow:"hidden",display:"flex",cursor:"pointer",borderLeft:`4px solid ${p.estado==="encontrado"?C.green:cat.color}`,opacity:p.estado==="encontrado"?.72:1,boxShadow:"0 1px 3px rgba(0,0,0,0.07)"}}>
             <div style={{width:76,minHeight:76,background:cat.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,flexShrink:0}}>
-              {p.foto?<img src={p.foto} alt="" style={{width:76,height:76,objectFit:"cover"}} />:cat.icon}
+              {p.foto?<img src={p.foto} alt="" style={{width:76,height:76,objectFit:"cover"}} />:<span style={{fontSize:11,fontWeight:700,color:cat.color,textAlign:"center",padding:4}}>{cat.label}</span>}
             </div>
             <div style={{padding:"10px 12px",flex:1,minWidth:0}}>
               <div style={{display:"flex",gap:4,marginBottom:4,flexWrap:"wrap"}}>
-                <Pill label={p.estado==="encontrado"?"✓ Encontrado":"Buscando"} color={p.estado==="encontrado"?C.green:C.amber} bg={p.estado==="encontrado"?C.greenLt:C.amberLt} />
+                <Pill label={p.estado==="encontrado"?"Encontrado":"Buscando"} color={p.estado==="encontrado"?C.green:C.amber} bg={p.estado==="encontrado"?C.greenLt:C.amberLt} />
                 <Pill label={cat.label} color={cat.color} bg={cat.bg} />
-                {p._off&&<Pill label="📴" color={C.muted} bg="#F1F5F9" />}
+                {p._off&&<Pill label="" color={C.muted} bg="#F1F5F9" />}
               </div>
               <div style={{fontWeight:800,fontSize:15,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.nombre}</div>
-              {p.hospital&&<div style={{fontSize:12,color:C.sky,fontWeight:600}}>🏥 {p.hospital}</div>}
-              {p.ubicacion&&<div style={{fontSize:12,color:C.muted}}>📍 {p.ubicacion}</div>}
-              {p.lat&&<div style={{fontSize:11,color:C.teal}}>🗺 GPS guardado</div>}
+              {p.hospital&&<div style={{fontSize:12,color:C.sky,fontWeight:600}}>{p.hospital}</div>}
+              {p.ubicacion&&<div style={{fontSize:12,color:C.muted}}>{p.ubicacion}</div>}
+              {p.lat&&<div style={{fontSize:11,color:C.teal}}>GPS guardado</div>}
             </div>
           </div>
         );
@@ -497,7 +497,7 @@ function AsistentesBar({ zonaId, asistentes, yoAsisto, onAsistir, onRetirar }: {
             </div>
             {total > 0 && (
               <div style={{ fontSize: 11, color: C.muted, marginTop: 1 }}>
-                {lista.slice(-3).map(a => a.nombre).join(", ")}{lista.length > 3 ? ` y ${lista.length - 3} más` : ""}
+                {lista.slice(-3).map(a => a.nombre).join(",")}{lista.length > 3 ? ` y ${lista.length - 3} más` : ""}
               </div>
             )}
           </div>
@@ -522,11 +522,11 @@ function AsistentesBar({ zonaId, asistentes, yoAsisto, onAsistir, onRetirar }: {
 
       {/* Botón principal */}
       {!yo ? (
-        <Btn onClick={onAsistir} full color={C.primary}>🙋 Voy a asistir esta zona</Btn>
+        <Btn onClick={onAsistir} full color={C.primary}>Voy a asistir esta zona</Btn>
       ) : (
         <div>
           <div style={{ background: C.greenLt, border: `1px solid ${C.green}`, borderRadius: 10, padding: "10px 14px", marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 18 }}>✅</span>
+            <span style={{ fontSize: 18 }}></span>
             <div>
               <div style={{ fontSize: 13, fontWeight: 700, color: C.green }}>Estás asistiendo esta zona</div>
               <div style={{ fontSize: 11, color: C.muted }}>Registrado como: {yo.nombre}</div>
@@ -554,7 +554,7 @@ function ModalAsistir({ zonaId, zonaName, onConfirm, onClose }: { zonaId: string
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 999, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
       <div style={{ background: "white", borderRadius: "20px 20px 0 0", padding: 24, width: "100%", maxWidth: 680, boxShadow: "0 -4px 30px rgba(0,0,0,0.2)" }}>
-        <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>🙋 Confirmar asistencia</div>
+        <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>Confirmar asistencia</div>
         <p style={{ margin: "0 0 16px", fontSize: 13, color: C.muted }}>Tu nombre aparecerá en el contador de <strong>{zonaName}</strong></p>
         <Field label="Tu nombre *">
           <Input value={nombre} onChange={setNombre} placeholder="Ej: Carlos Martínez" />
@@ -567,7 +567,7 @@ function ModalAsistir({ zonaId, zonaName, onConfirm, onClose }: { zonaId: string
         </Field>
         <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
           <Btn onClick={onClose} color={C.muted} outline full small>Cancelar</Btn>
-          <Btn onClick={confirm} full color={C.primary} disabled={!nombre.trim()}>✓ Confirmar — Voy a asistir</Btn>
+          <Btn onClick={confirm} full color={C.primary} disabled={!nombre.trim()}> Confirmar — Voy a asistir</Btn>
         </div>
       </div>
     </div>
@@ -590,13 +590,13 @@ function ZonasSection({ online, onToast }: SectionProps) {
   const tog = (field: "insumos" | "ayuda" | "personal", val: string) => setF(x => ({ ...x, [field]: x[field].includes(val) ? x[field].filter((v: string) => v !== val) : [...x[field], val] }));
 
   const save = async () => {
-    if (!f.nombre || !f.contacto) { onToast("⚠ Nombre de zona y contacto obligatorios", "warn"); return; }
+    if (!f.nombre || !f.contacto) { onToast("Nombre de zona y contacto obligatorios", "warn"); return; }
     const item = { ...f, estado_zona: "activa", id: uid(), ts: now(), _off: !online };
     await IDB.put("zonas", item);
     if (!online) addQ({ table: "zonas", action: "insert", data: item });
     await reload(); setView("list");
     setF({ nombre:"",estado:"",pais:"Venezuela",descripcion:"",lat:null as number | null,lng:null as number | null,insumos:[] as string[],ayuda:[] as string[],personal:[] as string[],contactoNombre:"",contacto:"",urgencia:"critica" });
-    onToast(online ? "✓ Zona de crisis publicada" : "💾 Guardada sin internet", online ? "ok" : "warn");
+    onToast(online ? "Zona de crisis publicada" : "Guardada sin internet", online ? "ok" : "warn");
   };
 
   const handleAsistir = (data: Asistente) => {
@@ -608,7 +608,7 @@ function ZonasSection({ online, onToast }: SectionProps) {
     setShowModal(false);
     // Actualizar sel para reflejar el nuevo conteo en el detalle
     setSel(s => s ? ({ ...s } as BaseRecord) : s);
-    onToast(`✓ ¡Gracias ${data.nombre}! Quedas registrado/a en esta zona`, "ok");
+    onToast(` ¡Gracias ${data.nombre}! Quedas registrado/a en esta zona`, "ok");
     if (!online) addQ({ table: "zona_asistentes", action: "insert", data: { zonaId, ...data, id: uid() } });
   };
 
@@ -636,16 +636,16 @@ function ZonasSection({ online, onToast }: SectionProps) {
         <Card>
           <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
             <Pill label={u.label} color={u.color} bg={u.bg} />
-            <Pill label={sel.estado_zona === "activa" ? "⚡ Activa" : "✓ Atendida"} color={sel.estado_zona === "activa" ? C.primary : C.green} bg={sel.estado_zona === "activa" ? C.primaryLt : C.greenLt} />
-            {totalAsist > 0 && <Pill label={`🙋 ${totalAsist} asistiendo`} color={C.green} bg={C.greenLt} />}
+            <Pill label={sel.estado_zona === "activa" ? "Activa" : "Atendida"} color={sel.estado_zona === "activa" ? C.primary : C.green} bg={sel.estado_zona === "activa" ? C.primaryLt : C.greenLt} />
+            {totalAsist > 0 && <Pill label={`${totalAsist} asistiendo`} color={C.green} bg={C.greenLt} />}
           </div>
           <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800 }}>{sel.nombre}</h2>
-          <p style={{ margin: "0 0 12px", color: C.muted, fontSize: 13 }}>📍 {[sel.estado, sel.pais].filter(Boolean).join(", ")}</p>
+          <p style={{ margin: "0 0 12px", color: C.muted, fontSize: 13 }}>{[sel.estado, sel.pais].filter(Boolean).join(",")}</p>
           {sel.descripcion && <div style={{ background: C.bg, borderRadius: 10, padding: 12, marginBottom: 14, fontSize: 13, lineHeight: 1.6 }}>{sel.descripcion}</div>}
           {sel.lat && sel.lng && <MapView lat={sel.lat} lng={sel.lng} label={sel.nombre} />}
-          {sel.insumos?.length > 0 && <div style={{ marginBottom: 12 }}><div style={{ fontSize: 11, fontWeight: 700, color: C.muted, marginBottom: 6, textTransform: "uppercase" }}>🧃 Insumos necesarios</div><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{sel.insumos.map((i: string) => <Pill key={i} label={i} color={C.amber} bg={C.amberLt} />)}</div></div>}
-          {sel.ayuda?.length > 0 && <div style={{ marginBottom: 12 }}><div style={{ fontSize: 11, fontWeight: 700, color: C.muted, marginBottom: 6, textTransform: "uppercase" }}>🤝 Tipo de ayuda</div><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{sel.ayuda.map((i: string) => <Pill key={i} label={i} color={C.primary} bg={C.primaryLt} />)}</div></div>}
-          {sel.personal?.length > 0 && <div style={{ marginBottom: 12 }}><div style={{ fontSize: 11, fontWeight: 700, color: C.muted, marginBottom: 6, textTransform: "uppercase" }}>👷 Personal solicitado</div><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{sel.personal.map((i: string) => <Pill key={i} label={i} color={C.teal} bg={C.tealLt} />)}</div></div>}
+          {sel.insumos?.length > 0 && <div style={{ marginBottom: 12 }}><div style={{ fontSize: 11, fontWeight: 700, color: C.muted, marginBottom: 6, textTransform: "uppercase" }}>Insumos necesarios</div><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{sel.insumos.map((i: string) => <Pill key={i} label={i} color={C.amber} bg={C.amberLt} />)}</div></div>}
+          {sel.ayuda?.length > 0 && <div style={{ marginBottom: 12 }}><div style={{ fontSize: 11, fontWeight: 700, color: C.muted, marginBottom: 6, textTransform: "uppercase" }}>Tipo de ayuda</div><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{sel.ayuda.map((i: string) => <Pill key={i} label={i} color={C.primary} bg={C.primaryLt} />)}</div></div>}
+          {sel.personal?.length > 0 && <div style={{ marginBottom: 12 }}><div style={{ fontSize: 11, fontWeight: 700, color: C.muted, marginBottom: 6, textTransform: "uppercase" }}>Personal solicitado</div><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{sel.personal.map((i: string) => <Pill key={i} label={i} color={C.teal} bg={C.tealLt} />)}</div></div>}
           <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 14, marginBottom: 4 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: "uppercase", marginBottom: 6 }}>Coordinación</div>
             {sel.contactoNombre && <p style={{ margin: "0 0 2px", fontWeight: 700, fontSize: 14 }}>{sel.contactoNombre}</p>}
@@ -689,17 +689,17 @@ function ZonasSection({ online, onToast }: SectionProps) {
         <Field label="Nombre / descripción del lugar *"><Input value={f.nombre} onChange={v => setF(x => ({ ...x, nombre: v }))} placeholder="Ej: Sector Las Flores, La Guaira" /></Field>
         <Field label="Ciudad / Estado"><Input value={f.estado} onChange={v => setF(x => ({ ...x, estado: v }))} placeholder="Ej: La Guaira, Vargas" /></Field>
         <Field label="País"><Input value={f.pais} onChange={v => setF(x => ({ ...x, pais: v }))} placeholder="Venezuela" /></Field>
-        <Field label="📍 Pinear ubicación exacta (toca el mapa o usa GPS)">
+        <Field label="Pinear ubicación exacta (toca el mapa o usa GPS)">
           <MapPicker lat={f.lat} lng={f.lng} onPin={(la, ln) => setF(x => ({ ...x, lat: la, lng: ln }))} />
-          {f.lat != null && f.lng != null && <p style={{ fontSize: 11, color: C.green, marginTop: 4, fontWeight: 600 }}>✓ Pin colocado: {f.lat.toFixed(4)}, {f.lng.toFixed(4)}</p>}
+          {f.lat != null && f.lng != null && <p style={{ fontSize: 11, color: C.green, marginTop: 4, fontWeight: 600 }}> Pin colocado: {f.lat.toFixed(4)}, {f.lng.toFixed(4)}</p>}
         </Field>
         <Field label="Situación actual"><Textarea value={f.descripcion} onChange={v => setF(x => ({ ...x, descripcion: v }))} placeholder="Casas destruidas, personas sin agua, heridos…" /></Field>
-        <Field label="🧃 Insumos que se necesitan"><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{INSUMOS.map((i: string) => <Chip key={i} label={i} active={f.insumos.includes(i)} onClick={() => tog("insumos", i)} />)}</div></Field>
-        <Field label="🤝 Tipo de ayuda requerida"><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{AYUDA.map((i: string) => <Chip key={i} label={i} active={f.ayuda.includes(i)} onClick={() => tog("ayuda", i)} />)}</div></Field>
-        <Field label="👷 Personal que se solicita"><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{PERSONAL.map((i: string) => <Chip key={i} label={i} active={f.personal.includes(i)} onClick={() => tog("personal", i)} />)}</div></Field>
+        <Field label="Insumos que se necesitan"><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{INSUMOS.map((i: string) => <Chip key={i} label={i} active={f.insumos.includes(i)} onClick={() => tog("insumos", i)} />)}</div></Field>
+        <Field label="Tipo de ayuda requerida"><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{AYUDA.map((i: string) => <Chip key={i} label={i} active={f.ayuda.includes(i)} onClick={() => tog("ayuda", i)} />)}</div></Field>
+        <Field label="Personal que se solicita"><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{PERSONAL.map((i: string) => <Chip key={i} label={i} active={f.personal.includes(i)} onClick={() => tog("personal", i)} />)}</div></Field>
         <Field label="Coordinador de zona"><Input value={f.contactoNombre} onChange={v => setF(x => ({ ...x, contactoNombre: v }))} placeholder="Nombre de quien coordina" /></Field>
         <Field label="Contacto *"><Input value={f.contacto} onChange={v => setF(x => ({ ...x, contacto: v }))} placeholder="+58 414-000-0000 / @usuario" /></Field>
-        <Btn onClick={save} full>{online ? "Publicar Zona de Crisis" : "💾 Guardar sin internet"}</Btn>
+        <Btn onClick={save} full>{online ? "Publicar Zona de Crisis" : "Guardar sin internet"}</Btn>
       </Card>
     </div>
   );
@@ -717,7 +717,7 @@ function ZonasSection({ online, onToast }: SectionProps) {
       {/* Alerta zonas sin nadie */}
       {sinAsistencia > 0 && items.length > 0 && (
         <div style={{ background: C.amberLt, border: `1px solid ${C.amber}`, borderRadius: 10, padding: "10px 14px", marginBottom: 12, display: "flex", gap: 8, alignItems: "center" }}>
-          <span style={{ fontSize: 18 }}>⚠️</span>
+          <span style={{ fontSize: 18 }}></span>
           <div style={{ fontSize: 12, fontWeight: 600, color: C.amber }}>
             {sinAsistencia} zona{sinAsistencia > 1 ? "s" : ""} sin personas asistiendo — ¡se necesita ayuda!
           </div>
@@ -733,7 +733,7 @@ function ZonasSection({ online, onToast }: SectionProps) {
       </div>
 
       {filtered.length === 0
-        ? <Empty icon="📍" msg={items.length === 0 ? "Sin zonas reportadas" : "Sin resultados"} />
+        ? <Empty icon={null} msg={items.length === 0 ? "Sin zonas reportadas" : "Sin resultados"} />
         : filtered.map((z: BaseRecord) => {
           const u = urg(z.urgencia);
           const totalA = (asistentes[z.id] || []).length;
@@ -742,25 +742,25 @@ function ZonasSection({ online, onToast }: SectionProps) {
             <div key={z.id} onClick={() => { setSel(z); setView("detail"); }} style={{ background: "white", borderRadius: 12, padding: "14px 16px", marginBottom: 10, cursor: "pointer", borderLeft: `4px solid ${u.color}`, boxShadow: "0 1px 3px rgba(0,0,0,0.07)" }}>
               <div style={{ display: "flex", gap: 5, marginBottom: 6, flexWrap: "wrap", alignItems: "center" }}>
                 <Pill label={u.label} color={u.color} bg={u.bg} />
-                <Pill label={z.estado_zona === "activa" ? "⚡ Activa" : "✓ Atendida"} color={z.estado_zona === "activa" ? C.primary : C.green} bg={z.estado_zona === "activa" ? C.primaryLt : C.greenLt} />
-                {z.lat && <Pill label="🗺 GPS" color={C.teal} bg={C.tealLt} />}
-                {z._off && <Pill label="📴" color={C.muted} bg="#F1F5F9" />}
+                <Pill label={z.estado_zona === "activa" ? "Activa" : "Atendida"} color={z.estado_zona === "activa" ? C.primary : C.green} bg={z.estado_zona === "activa" ? C.primaryLt : C.greenLt} />
+                {z.lat && <Pill label="GPS" color={C.teal} bg={C.tealLt} />}
+                {z._off && <Pill label="" color={C.muted} bg="#F1F5F9" />}
               </div>
               <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 2 }}>{z.nombre}</div>
-              <div style={{ fontSize: 12, color: C.muted, marginBottom: 6 }}>📍 {[z.estado, z.pais].filter(Boolean).join(", ")}</div>
-              {z.insumos?.length > 0 && <div style={{ fontSize: 12, color: C.amber, marginBottom: 2 }}>🧃 {z.insumos.slice(0, 3).join(" · ")}{z.insumos.length > 3 ? ` +${z.insumos.length - 3}` : ""}</div>}
-              {z.personal?.length > 0 && <div style={{ fontSize: 12, color: C.primary, marginBottom: 8 }}>👷 {z.personal.slice(0, 2).join(" · ")}{z.personal.length > 2 ? ` +${z.personal.length - 2}` : ""}</div>}
+              <div style={{ fontSize: 12, color: C.muted, marginBottom: 6 }}>{[z.estado, z.pais].filter(Boolean).join(",")}</div>
+              {z.insumos?.length > 0 && <div style={{ fontSize: 12, color: C.amber, marginBottom: 2 }}>{z.insumos.slice(0, 3).join("·")}{z.insumos.length > 3 ? ` +${z.insumos.length - 3}` : ""}</div>}
+              {z.personal?.length > 0 && <div style={{ fontSize: 12, color: C.primary, marginBottom: 8 }}>{z.personal.slice(0, 2).join("·")}{z.personal.length > 2 ? ` +${z.personal.length - 2}` : ""}</div>}
 
               {/* Contador asistentes en la tarjeta */}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderTop: `1px solid ${C.border}`, paddingTop: 8, marginTop: 4 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   {totalA === 0
-                    ? <span style={{ fontSize: 12, color: C.muted }}>🙋 Nadie asistiendo aún</span>
-                    : <span style={{ fontSize: 12, fontWeight: 700, color: C.green }}>🙋 {totalA} persona{totalA > 1 ? "s" : ""} asistiendo</span>
+                    ? <span style={{ fontSize: 12, color: C.muted }}>Nadie asistiendo aún</span>
+                    : <span style={{ fontSize: 12, fontWeight: 700, color: C.green }}>{totalA} persona{totalA > 1 ? "s" : ""} asistiendo</span>
                   }
                 </div>
                 {yoVoy
-                  ? <span style={{ fontSize: 11, fontWeight: 700, color: C.green, background: C.greenLt, padding: "3px 8px", borderRadius: 20 }}>✓ Tú vas</span>
+                  ? <span style={{ fontSize: 11, fontWeight: 700, color: C.green, background: C.greenLt, padding: "3px 8px", borderRadius: 20 }}> Tú vas</span>
                   : <span style={{ fontSize: 11, fontWeight: 700, color: C.primary, background: C.primaryLt, padding: "3px 8px", borderRadius: 20 }}>Toca para asistir</span>
                 }
               </div>
@@ -786,13 +786,13 @@ function MascotasSection({ online, onToast }: SectionProps) {
   useEffect(()=>{ reload(); },[reload]);
 
   const save = async () => {
-    if (!f.ubicacion||!f.contacto) { onToast("⚠ Ubicación y contacto obligatorios","warn"); return; }
+    if (!f.ubicacion||!f.contacto) { onToast("Ubicación y contacto obligatorios","warn"); return; }
     const item = { ...f, foto, id:uid(), ts:now(), _off:!online };
     await IDB.put("mascotas", item);
     if (!online) addQ({ table:"mascotas", action:"insert", data:item });
     await reload(); setView("list"); setFoto(null);
     setF({ especie:"Perro",nombre:"",color:"",cat:"sana",heridas:"",ubicacion:"",contacto:"",contactoNombre:"",lat:null as number | null,lng:null as number | null });
-    onToast(online?"✓ Mascota reportada":"💾 Guardada sin internet",online?"ok":"warn");
+    onToast(online?"Mascota reportada":"Guardada sin internet",online?"ok":"warn");
   };
 
   const filtered = catF==="todos"?items:items.filter((m: BaseRecord)=>m.cat===catF);
@@ -805,7 +805,7 @@ function MascotasSection({ online, onToast }: SectionProps) {
         <PhotoUpload preview={foto} onFile={setFoto} label="Foto de la mascota" />
         <Field label="Estado">
           <div style={{display:"flex",gap:8}}>
-            {MASCOTA_CATS.map(c=><button key={c.id} onClick={()=>setF(x=>({...x,cat:c.id}))} style={{flex:1,padding:"9px",borderRadius:8,border:`2px solid ${f.cat===c.id?c.color:C.border}`,background:f.cat===c.id?c.bg:"white",color:f.cat===c.id?c.color:C.muted,fontWeight:700,fontSize:12,cursor:"pointer"}}>{c.icon} {c.label}</button>)}
+            {MASCOTA_CATS.map(c=><button key={c.id} onClick={()=>setF(x=>({...x,cat:c.id}))} style={{flex:1,padding:"9px",borderRadius:8,border:`2px solid ${f.cat===c.id?c.color:C.border}`,background:f.cat===c.id?c.bg:"white",color:f.cat===c.id?c.color:C.muted,fontWeight:700,fontSize:12,cursor:"pointer"}}>{c.label}</button>)}
           </div>
         </Field>
         <Field label="Especie"><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{["Perro","Gato","Ave","Otro"].map(e=><Chip key={e} label={e} active={f.especie===e} onClick={()=>setF(x=>({...x,especie:e}))} />)}</div></Field>
@@ -815,11 +815,11 @@ function MascotasSection({ online, onToast }: SectionProps) {
         <Field label="Dónde está ahora (texto)"><Input value={f.ubicacion} onChange={v=>setF(x=>({...x,ubicacion:v}))} placeholder="Ej: Av. Libertador, Caracas" /></Field>
         <Field label="Pinear en el mapa">
           <MapPicker lat={f.lat} lng={f.lng} onPin={(la,ln)=>setF(x=>({...x,lat:la,lng:ln}))} />
-          {f.lat != null && f.lng != null && <p style={{fontSize:11,color:C.green,marginTop:4,fontWeight:600}}>✓ Pin: {f.lat.toFixed(4)}, {f.lng.toFixed(4)}</p>}
+          {f.lat != null && f.lng != null && <p style={{fontSize:11,color:C.green,marginTop:4,fontWeight:600}}> Pin: {f.lat.toFixed(4)}, {f.lng.toFixed(4)}</p>}
         </Field>
         <Field label="Tu nombre"><Input value={f.contactoNombre} onChange={v=>setF(x=>({...x,contactoNombre:v}))} placeholder="Quien reporta" /></Field>
         <Field label="Contacto *"><Input value={f.contacto} onChange={v=>setF(x=>({...x,contacto:v}))} placeholder="+58 414-000-0000" /></Field>
-        <Btn onClick={save} full>{online?"Publicar":"💾 Guardar sin internet"}</Btn>
+        <Btn onClick={save} full>{online?"Publicar":"Guardar sin internet"}</Btn>
       </Card>
     </div>
   );
@@ -833,25 +833,25 @@ function MascotasSection({ online, onToast }: SectionProps) {
       <div style={{display:"flex",gap:8,marginBottom:12,alignItems:"center"}}>
         <div style={{display:"flex",gap:5,flex:1,flexWrap:"wrap"}}>
           <Chip label="Todas" active={catF==="todos"} onClick={()=>setCatF("todos")} />
-          {MASCOTA_CATS.map(c=><Chip key={c.id} label={c.icon+" "+c.label} active={catF===c.id} onClick={()=>setCatF(c.id)} color={c.color} />)}
+          {MASCOTA_CATS.map(c=><Chip key={c.id} label={c.label} active={catF===c.id} onClick={()=>setCatF(c.id)} color={c.color} />)}
         </div>
         <Btn onClick={()=>setView("form")} small>+ Reportar</Btn>
       </div>
-      {filtered.length===0 ? <Empty icon="🐾" msg={items.length===0?"Sin reportes aún":"Sin resultados"} /> : filtered.map((m: BaseRecord)=>{
+      {filtered.length===0 ? <Empty icon={null} msg={items.length===0?"Sin reportes aún":"Sin resultados"} /> : filtered.map((m: BaseRecord)=>{
         const cat=MASCOTA_CATS.find(c=>c.id===m.cat)||MASCOTA_CATS[0];
         return (
           <div key={m.id} style={{background:"white",borderRadius:12,marginBottom:10,overflow:"hidden",display:"flex",borderLeft:`4px solid ${cat.color}`,boxShadow:"0 1px 3px rgba(0,0,0,0.07)"}}>
             <div style={{width:76,minHeight:76,background:cat.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,flexShrink:0}}>
-              {m.foto?<img src={m.foto} alt="" style={{width:76,height:76,objectFit:"cover"}} />:cat.icon}
+              {m.foto?<img src={m.foto} alt="" style={{width:76,height:76,objectFit:"cover"}} />:<span style={{fontSize:11,fontWeight:700,color:cat.color,textAlign:"center",padding:4}}>{cat.label}</span>}
             </div>
             <div style={{padding:"10px 12px",flex:1}}>
               <Pill label={cat.label} color={cat.color} bg={cat.bg} />
               <div style={{fontWeight:800,fontSize:15,marginTop:4}}>{m.especie}{m.nombre?` — ${m.nombre}`:""}</div>
-              {m.color&&<div style={{fontSize:12,color:C.muted}}>🎨 {m.color}</div>}
-              <div style={{fontSize:12,color:C.muted}}>📍 {m.ubicacion}</div>
-              {m.heridas&&<div style={{fontSize:12,color:C.amber,marginTop:2}}>🩹 {m.heridas}</div>}
-              {m.lat&&<div style={{fontSize:11,color:C.teal}}>🗺 GPS guardado</div>}
-              <div style={{fontSize:12,color:C.muted,marginTop:2}}>📞 {m.contacto}</div>
+              {m.color&&<div style={{fontSize:12,color:C.muted}}>{m.color}</div>}
+              <div style={{fontSize:12,color:C.muted}}>{m.ubicacion}</div>
+              {m.heridas&&<div style={{fontSize:12,color:C.amber,marginTop:2}}>{m.heridas}</div>}
+              {m.lat&&<div style={{fontSize:11,color:C.teal}}>GPS guardado</div>}
+              <div style={{fontSize:12,color:C.muted,marginTop:2}}>{m.contacto}</div>
             </div>
           </div>
         );
@@ -880,13 +880,13 @@ function VoluntariosSection({ online, onToast }: SectionProps) {
   const puedeRemoto = f.especialidades.some(e => REMOTE_ESPECIALIDADES.includes(e));
 
   const save = async () => {
-    if (!f.nombre||!f.contacto||!f.especialidades.length) { onToast("⚠ Nombre, especialidad y contacto obligatorios","warn"); return; }
+    if (!f.nombre||!f.contacto||!f.especialidades.length) { onToast("Nombre, especialidad y contacto obligatorios","warn"); return; }
     const item = { ...f, pais:"Venezuela", remoto: puedeRemoto ? f.remoto : false, idiomas:f.idiomas.split(",").map(s=>s.trim()), estado:"disponible", id:uid(), ts:now(), _off:!online };
     await IDB.put("voluntarios", item);
     if (!online) addQ({ table:"voluntarios", action:"insert", data:item });
     await reload(); setView("list");
     setF({ nombre:"",especialidades:[] as string[],pais:"Venezuela",ciudad:"",remoto:false,idiomas:"Español",bio:"",contacto:"",lat:null as number | null,lng:null as number | null });
-    onToast(online?"✓ Registrado como voluntario":"💾 Guardado sin internet",online?"ok":"warn");
+    onToast(online?"Registrado como voluntario":"Guardado sin internet",online?"ok":"warn");
   };
 
   const filtered = items.filter((v: BaseRecord)=>{
@@ -902,11 +902,11 @@ function VoluntariosSection({ online, onToast }: SectionProps) {
         <p style={{margin:"0 0 14px",fontSize:12,color:C.muted}}>Visible para coordinadores de todo el mundo que necesitan ayuda especializada</p>
         <Field label="Nombre completo *"><Input value={f.nombre} onChange={v=>setF(x=>({...x,nombre:v}))} placeholder="Tu nombre" /></Field>
         <Field label="Ciudad"><Input value={f.ciudad} onChange={v=>setF(x=>({...x,ciudad:v}))} placeholder="Ej: Caracas, Maracaibo, Valencia…" /></Field>
-        <Field label="🎓 Especialidades *"><div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{ESPECIALIDADES.map(e=><Chip key={e} label={e} active={f.especialidades.includes(e)} onClick={()=>togE(e)} color={C.teal} />)}</div></Field>
+        <Field label="Especialidades *"><div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{ESPECIALIDADES.map(e=><Chip key={e} label={e} active={f.especialidades.includes(e)} onClick={()=>togE(e)} color={C.teal} />)}</div></Field>
         {puedeRemoto && (
           <Field label="¿Puedes ayudar remotamente?">
             <div style={{display:"flex",gap:6}}>
-              <Chip label="✓ Sí, puedo ayudar remoto" active={f.remoto} onClick={()=>setF(x=>({...x,remoto:true}))} color={C.green} />
+              <Chip label="Sí, puedo ayudar remoto" active={f.remoto} onClick={()=>setF(x=>({...x,remoto:true}))} color={C.green} />
               <Chip label="Solo presencial" active={!f.remoto} onClick={()=>setF(x=>({...x,remoto:false}))} color={C.muted} />
             </div>
           </Field>
@@ -917,7 +917,7 @@ function VoluntariosSection({ online, onToast }: SectionProps) {
         </Field>
         <Field label="Sobre ti (opcional)"><Textarea value={f.bio} onChange={v=>setF(x=>({...x,bio:v}))} placeholder="Experiencia, equipamiento disponible…" rows={2} /></Field>
         <Field label="Contacto *"><Input value={f.contacto} onChange={v=>setF(x=>({...x,contacto:v}))} placeholder="+58 414-000-0000 / @usuario / email" /></Field>
-        <Btn onClick={save} full color={C.teal}>{online?"Registrarme":"💾 Guardar sin internet"}</Btn>
+        <Btn onClick={save} full color={C.teal}>{online?"Registrarme":"Guardar sin internet"}</Btn>
       </Card>
     </div>
   );
@@ -926,15 +926,15 @@ function VoluntariosSection({ online, onToast }: SectionProps) {
     <div>
       <Back onClick={()=>{ setSel(null); setView("list"); }} />
       <Card>
-        <div style={{width:52,height:52,borderRadius:"50%",background:C.tealLt,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,marginBottom:12}}>🙋</div>
+        <div style={{width:52,height:52,borderRadius:"50%",background:C.tealLt,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,marginBottom:12}}></div>
         <div style={{display:"flex",gap:5,marginBottom:8,flexWrap:"wrap"}}>
-          <Pill label="✓ Disponible" color={C.green} bg={C.greenLt} />
-          {sel.remoto&&<Pill label="💻 Remoto" color={C.teal} bg={C.tealLt} />}
-          {sel.pais!=="Venezuela"&&<Pill label={`🌍 ${sel.pais}`} color={C.primary} bg={C.primaryLt} />}
+          <Pill label="Disponible" color={C.green} bg={C.greenLt} />
+          {sel.remoto&&<Pill label="Remoto" color={C.teal} bg={C.tealLt} />}
+          {sel.pais!=="Venezuela"&&<Pill label={`${sel.pais}`} color={C.primary} bg={C.primaryLt} />}
         </div>
         <h2 style={{margin:"0 0 4px",fontSize:20,fontWeight:800}}>{sel.nombre}</h2>
-        <p style={{margin:"0 0 4px",color:C.muted,fontSize:13}}>📍 {[sel.ciudad,sel.pais].filter(Boolean).join(", ")}</p>
-        {sel.idiomas?.length>0&&<p style={{margin:"0 0 12px",color:C.muted,fontSize:12}}>🗣 {(Array.isArray(sel.idiomas)?sel.idiomas:[sel.idiomas]).join(", ")}</p>}
+        <p style={{margin:"0 0 4px",color:C.muted,fontSize:13}}>{[sel.ciudad,sel.pais].filter(Boolean).join(",")}</p>
+        {sel.idiomas?.length>0&&<p style={{margin:"0 0 12px",color:C.muted,fontSize:12}}>{(Array.isArray(sel.idiomas)?sel.idiomas:[sel.idiomas]).join(",")}</p>}
         {sel.especialidades?.length>0&&<div style={{marginBottom:12}}><div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:6,textTransform:"uppercase"}}>Especialidades</div><div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{sel.especialidades.map((e: string)=><Pill key={e} label={e} color={C.teal} bg={C.tealLt} />)}</div></div>}
         {sel.bio&&<div style={{background:C.bg,borderRadius:10,padding:12,marginBottom:14,fontSize:13,lineHeight:1.6}}>{sel.bio}</div>}
         {sel.lat&&sel.lng&&<MapView lat={sel.lat} lng={sel.lng} label={sel.ciudad} />}
@@ -951,21 +951,21 @@ function VoluntariosSection({ online, onToast }: SectionProps) {
         <StatBox n={items.filter((v: BaseRecord)=>v.estado==="disponible").length} label="Disponibles" color={C.green} />
       </div>
       <div style={{display:"flex",gap:8,marginBottom:10}}>
-        <input value={q} onChange={e=>setQ(e.target.value)} placeholder="🔍 Nombre, especialidad, ciudad…" style={{flex:1,padding:"10px 12px",borderRadius:8,border:`1.5px solid ${C.border}`,fontSize:13,outline:"none"}} />
+        <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Nombre, especialidad, ciudad…" style={{flex:1,padding:"10px 12px",borderRadius:8,border:`1.5px solid ${C.border}`,fontSize:13,outline:"none"}} />
         <Btn onClick={()=>setView("form")} small color={C.teal}>+ Unirme</Btn>
       </div>
-      {filtered.length===0 ? <Empty icon="🙋" msg={items.length===0?"Sé el primero en registrarte":"Sin resultados"} /> : filtered.map((v: BaseRecord)=>(
+      {filtered.length===0 ? <Empty icon={null} msg={items.length===0?"Sé el primero en registrarte":"Sin resultados"} /> : filtered.map((v: BaseRecord)=>(
         <div key={v.id} onClick={()=>{ setSel(v); setView("detail"); }} style={{background:"white",borderRadius:12,padding:"12px 14px",marginBottom:10,cursor:"pointer",borderLeft:`4px solid ${v.pais!=="Venezuela"?C.primary:C.teal}`,boxShadow:"0 1px 3px rgba(0,0,0,0.07)",display:"flex",gap:12,alignItems:"flex-start"}}>
-          <div style={{width:40,height:40,borderRadius:"50%",background:v.pais!=="Venezuela"?C.primaryLt:C.tealLt,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>🙋</div>
+          <div style={{width:40,height:40,borderRadius:"50%",background:v.pais!=="Venezuela"?C.primaryLt:C.tealLt,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}></div>
           <div style={{flex:1,minWidth:0}}>
             <div style={{display:"flex",gap:4,marginBottom:4,flexWrap:"wrap"}}>
-              <Pill label="✓ Disponible" color={C.green} bg={C.greenLt} />
-              {v.remoto&&<Pill label="💻 Remoto" color={C.teal} bg={C.tealLt} />}
-              {v.pais!=="Venezuela"&&<Pill label={`🌍 ${v.pais}`} color={C.primary} bg={C.primaryLt} />}
+              <Pill label="Disponible" color={C.green} bg={C.greenLt} />
+              {v.remoto&&<Pill label="Remoto" color={C.teal} bg={C.tealLt} />}
+              {v.pais!=="Venezuela"&&<Pill label={`${v.pais}`} color={C.primary} bg={C.primaryLt} />}
             </div>
             <div style={{fontWeight:800,fontSize:15}}>{v.nombre}</div>
-            <div style={{fontSize:12,color:C.muted}}>{[v.ciudad,v.pais].filter(Boolean).join(", ")}</div>
-            {v.especialidades?.length>0&&<div style={{fontSize:12,color:C.teal,marginTop:2}}>🎓 {v.especialidades.slice(0,3).join(" · ")}{v.especialidades.length>3?` +${v.especialidades.length-3}`:""}</div>}
+            <div style={{fontSize:12,color:C.muted}}>{[v.ciudad,v.pais].filter(Boolean).join(",")}</div>
+            {v.especialidades?.length>0&&<div style={{fontSize:12,color:C.teal,marginTop:2}}>{v.especialidades.slice(0,3).join("·")}{v.especialidades.length>3?` +${v.especialidades.length-3}`:""}</div>}
           </div>
         </div>
       ))}
@@ -977,37 +977,37 @@ function VoluntariosSection({ online, onToast }: SectionProps) {
 // DONACIONES
 // ============================================================
 const CUENTAS = [
-  { tipo:"Zelle", icon:"💵", instruccion:"Enviar a:", dato:"crisisve@gmail.com", nombre:"Reconstruyendo Venezuela Ayuda Humanitaria" },
+  { tipo:"Zelle", instruccion:"Enviar a:", dato:"crisisve@gmail.com", nombre:"Reconstruyendo Venezuela Ayuda Humanitaria" },
 ];
 
 // Destinos detallados con categorías
 const DESTINOS = [
-  { cat:"🍽 Alimentación",      items:["Cajas de alimentos","Agua potable","Fórmula infantil / leche","Comida para bebés","Cocinas y utensilios","Otro (alimentación)"] },
-  { cat:"💊 Salud y Medicina",  items:["Medicamentos básicos","Medicamentos crónicos (insulina, etc.)","Suero y soluciones IV","Material de curas y vendajes","Equipos médicos (tensiómetros, etc.)","Oxígeno medicinal","Otro (salud)"] },
-  { cat:"🏥 Hospitales y Paramédicos", items:["Insumos quirúrgicos","Equipos de UCI","Camillas y sillas de ruedas","Desfibriladores / monitors","Insumos de enfermería","Ambulancias / transporte médico","Otro (hospitales)"] },
-  { cat:"🚒 Rescate y Emergencias", items:["Equipos de rescate","Cuerdas / arneses / cascos","Motosierras y herramientas","Botes de rescate","Drones de búsqueda","Primeros auxilios avanzados","Otro (rescate)"] },
-  { cat:"🔨 Ferretería e Infraestructura", items:["Materiales de construcción","Herramientas básicas","Generadores eléctricos","Combustible y gas","Linternas y baterías","Carpas y lonas","Otro (ferretería)"] },
-  { cat:"👕 Ropa y Abrigo",     items:["Ropa para adultos","Ropa para niños","Calzado","Frazadas y colchonetas","Pañales y ropa de bebé","Kits de higiene personal","Otro (ropa)"] },
-  { cat:"⚰ Gastos Fúnebres",   items:["Ataúdes y urnas","Traslado de restos","Servicios funerarios","Apoyo a familias en duelo","Otro (gastos fúnebres)"] },
-  { cat:"🧠 Apoyo Psicológico", items:["Atención psicológica","Grupos de apoyo","Material terapéutico","Apoyo a niños en crisis","Otro (apoyo psicológico)"] },
-  { cat:"📡 Comunicaciones",    items:["Teléfonos satelitales","Radios de emergencia","Internet de emergencia","Otro (comunicaciones)"] },
-  { cat:"🐾 Animales",          items:["Alimento para mascotas","Atención veterinaria","Refugio para animales","Otro (animales)"] },
+  { cat:"Alimentación",      items:["Cajas de alimentos","Agua potable","Fórmula infantil / leche","Comida para bebés","Cocinas y utensilios","Otro (alimentación)"] },
+  { cat:"Salud y Medicina",  items:["Medicamentos básicos","Medicamentos crónicos (insulina, etc.)","Suero y soluciones IV","Material de curas y vendajes","Equipos médicos (tensiómetros, etc.)","Oxígeno medicinal","Otro (salud)"] },
+  { cat:"Hospitales y Paramédicos", items:["Insumos quirúrgicos","Equipos de UCI","Camillas y sillas de ruedas","Desfibriladores / monitors","Insumos de enfermería","Ambulancias / transporte médico","Otro (hospitales)"] },
+  { cat:"Rescate y Emergencias", items:["Equipos de rescate","Cuerdas / arneses / cascos","Motosierras y herramientas","Botes de rescate","Drones de búsqueda","Primeros auxilios avanzados","Otro (rescate)"] },
+  { cat:"Ferretería e Infraestructura", items:["Materiales de construcción","Herramientas básicas","Generadores eléctricos","Combustible y gas","Linternas y baterías","Carpas y lonas","Otro (ferretería)"] },
+  { cat:"Ropa y Abrigo",     items:["Ropa para adultos","Ropa para niños","Calzado","Frazadas y colchonetas","Pañales y ropa de bebé","Kits de higiene personal","Otro (ropa)"] },
+  { cat:"Gastos Fúnebres",   items:["Ataúdes y urnas","Traslado de restos","Servicios funerarios","Apoyo a familias en duelo","Otro (gastos fúnebres)"] },
+  { cat:"Apoyo Psicológico", items:["Atención psicológica","Grupos de apoyo","Material terapéutico","Apoyo a niños en crisis","Otro (apoyo psicológico)"] },
+  { cat:"Comunicaciones",    items:["Teléfonos satelitales","Radios de emergencia","Internet de emergencia","Otro (comunicaciones)"] },
+  { cat:"Animales",          items:["Alimento para mascotas","Atención veterinaria","Refugio para animales","Otro (animales)"] },
 ];
 
 const ALL_DESTINOS = DESTINOS.flatMap(d => d.items);
 
 // Colores por categoría
 const CAT_COLORS: Record<string, { color: string; bg: string }> = {
-  "🍽 Alimentación": { color: C.green,  bg: C.greenLt },
-  "💊 Salud y Medicina": { color: C.sky, bg: C.skyLt },
-  "🏥 Hospitales y Paramédicos": { color: C.primary, bg: C.primaryLt },
-  "🚒 Rescate y Emergencias": { color: C.amber, bg: C.amberLt },
-  "🔨 Ferretería e Infraestructura": { color: C.teal, bg: C.tealLt },
-  "👕 Ropa y Abrigo": { color: C.purple, bg: C.purpleLt },
-  "⚰ Gastos Fúnebres": { color: C.muted, bg: "#F1F5F9" },
-  "🧠 Apoyo Psicológico": { color: "#7C3AED", bg: "#F5F3FF" },
-  "📡 Comunicaciones": { color: C.sky, bg: C.skyLt },
-  "🐾 Animales": { color: C.teal, bg: C.tealLt },
+  "Alimentación": { color: C.green,  bg: C.greenLt },
+  "Salud y Medicina": { color: C.sky, bg: C.skyLt },
+  "Hospitales y Paramédicos": { color: C.primary, bg: C.primaryLt },
+  "Rescate y Emergencias": { color: C.amber, bg: C.amberLt },
+  "Ferretería e Infraestructura": { color: C.teal, bg: C.tealLt },
+  "Ropa y Abrigo": { color: C.purple, bg: C.purpleLt },
+  "Gastos Fúnebres": { color: C.muted, bg: "#F1F5F9" },
+  "Apoyo Psicológico": { color: "#7C3AED", bg: "#F5F3FF" },
+  "Comunicaciones": { color: C.sky, bg: C.skyLt },
+  "Animales": { color: C.teal, bg: C.tealLt },
 };
 
 function catForDestino(destino: string) {
@@ -1060,24 +1060,24 @@ function DonacionesSection({ online, onToast }: SectionProps) {
   const totalesPorDestino = calcTotalesPorDestino(dons);
 
   const saveDon = async () => {
-    if (!fd.monto || !fd.nombre) { onToast("⚠ Monto y nombre son obligatorios", "warn"); return; }
-    if (!fd.destinos.length) { onToast("⚠ Selecciona al menos un destino para tu donación", "warn"); return; }
+    if (!fd.monto || !fd.nombre) { onToast("Monto y nombre son obligatorios", "warn"); return; }
+    if (!fd.destinos.length) { onToast("Selecciona al menos un destino para tu donación", "warn"); return; }
     const item = { ...fd, comprobante: comp, verificado: false, id: uid(), ts: now(), _off: !online };
     await IDB.put("donaciones", item);
     if (!online) addQ({ table: "donaciones", action: "insert", data: item });
     await reload(); setView("main"); setComp(null);
     setFd({ monto:"", moneda:"USD", metodo:"Zelle", nombre:"", mensaje:"", destinos:[] as string[] });
-    onToast("💙 ¡Gracias! Tu donación fue registrada y se verificará pronto.", "ok");
+    onToast("¡Gracias! Tu donación fue registrada y se verificará pronto.", "ok");
   };
 
   const saveCampana = () => {
-    if (!fc.nombre || !fc.contacto || !fc.destinos.length) { onToast("⚠ Nombre, contacto y al menos un destino son obligatorios", "warn"); return; }
+    if (!fc.nombre || !fc.contacto || !fc.destinos.length) { onToast("Nombre, contacto y al menos un destino son obligatorios", "warn"); return; }
     const item = { ...fc, logo, id: uid(), ts: now(), totalRecaudado: 0, donantes: 0, _off: !online };
     const nueva = [item, ...campanas];
     saveCampanas(nueva); setCampanas(nueva); setView("main");
     setFc({ nombre:"", tipo:"org", descripcion:"", meta:"", moneda:"USD", destinos:[] as string[], contacto:"", zelle:"", pagoMovil:"", banco:"", cuenta:"", pais:"Venezuela" });
     setLogo(null);
-    onToast("✓ Campaña registrada — ¡gracias por organizarte!", "ok");
+    onToast("Campaña registrada — ¡gracias por organizarte!", "ok");
   };
 
   // ── FORM DONACIÓN ──────────────────────────────────────────
@@ -1095,7 +1095,7 @@ function DonacionesSection({ online, onToast }: SectionProps) {
 
         <Field label="Método de pago">
           <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-            {CUENTAS.map(c => <Chip key={c.tipo} label={c.icon+" "+c.tipo} active={fd.metodo===c.tipo} onClick={() => setFd(x=>({...x,metodo:c.tipo}))} />)}
+            {CUENTAS.map(c => <Chip key={c.tipo} label={c.tipo} active={fd.metodo===c.tipo} onClick={() => setFd(x=>({...x,metodo:c.tipo}))} />)}
           </div>
         </Field>
         {(() => { const cu = CUENTAS.find(c => c.tipo===fd.metodo); return cu ? (
@@ -1114,9 +1114,9 @@ function DonacionesSection({ online, onToast }: SectionProps) {
         </Field>
         <Field label="Monto *"><Input value={fd.monto} onChange={v=>setFd(x=>({...x,monto:v}))} placeholder={fd.moneda==="USD"?"Ej: 25.00":"Ej: 50000"} type="number" /></Field>
         <Field label="Tu nombre o alias *"><Input value={fd.nombre} onChange={v=>setFd(x=>({...x,nombre:v}))} placeholder="Nombre, organización o anónimo" /></Field>
-        <Field label="Mensaje (opcional)"><Textarea value={fd.mensaje} onChange={v=>setFd(x=>({...x,mensaje:v}))} placeholder="Ej: Con amor para las familias de La Guaira 💙" rows={2} /></Field>
+        <Field label="Mensaje (opcional)"><Textarea value={fd.mensaje} onChange={v=>setFd(x=>({...x,mensaje:v}))} placeholder="Ej: Con amor para las familias de La Guaira" rows={2} /></Field>
 
-        <Field label="🎯 ¿Para qué va tu donación? * (selecciona todos los que aplican)">
+        <Field label="¿Para qué va tu donación? * (selecciona todos los que aplican)">
           <p style={{ fontSize:11, color:C.muted, margin:"0 0 10px" }}>Esto garantiza transparencia total — todos verán el desglose exacto</p>
           {DESTINOS.map(cat => (
             <div key={cat.cat} style={{ marginBottom:12 }}>
@@ -1133,7 +1133,7 @@ function DonacionesSection({ online, onToast }: SectionProps) {
 
         {fd.destinos.length > 0 && (
           <div style={{ background:C.greenLt, borderRadius:10, padding:12, marginBottom:14 }}>
-            <div style={{ fontSize:11, fontWeight:700, color:C.green, marginBottom:6 }}>✓ Tu donación irá a:</div>
+            <div style={{ fontSize:11, fontWeight:700, color:C.green, marginBottom:6 }}> Tu donación irá a:</div>
             <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
               {fd.destinos.map((d: string) => { const cc=catForDestino(d); return <Pill key={d} label={d} color={cc.color} bg={cc.bg} />; })}
             </div>
@@ -1143,7 +1143,7 @@ function DonacionesSection({ online, onToast }: SectionProps) {
         <Field label="Comprobante de pago (foto)">
           <PhotoUpload preview={comp} onFile={setComp} label="Subir comprobante" />
         </Field>
-        <Btn onClick={saveDon} full color={C.primary}>💙 Registrar Donación</Btn>
+        <Btn onClick={saveDon} full color={C.primary}>Registrar Donación</Btn>
       </Card>
     </div>
   );
@@ -1160,7 +1160,7 @@ function DonacionesSection({ online, onToast }: SectionProps) {
 
         <Field label="Tipo">
           <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-            {[["org","🏛 Organización / Fundación"],["empresa","🏢 Empresa / Negocio"]].map(([v,l]) => (
+            {[["org","Organización / Fundación"],["empresa","Empresa / Negocio"]].map(([v,l]) => (
               <Chip key={v} label={l} active={fc.tipo===v} onClick={() => setFc(x=>({...x,tipo:v}))} />
             ))}
           </div>
@@ -1170,7 +1170,7 @@ function DonacionesSection({ online, onToast }: SectionProps) {
         <Field label="País de origen"><Input value={fc.pais} onChange={v=>setFc(x=>({...x,pais:v}))} placeholder="Venezuela, Colombia, España…" /></Field>
         <Field label="Descripción de la campaña"><Textarea value={fc.descripcion} onChange={v=>setFc(x=>({...x,descripcion:v}))} placeholder="Qué están haciendo, cómo van a usar los fondos, dónde están trabajando…" rows={3} /></Field>
 
-        <Field label="🎯 ¿Para qué van los fondos recolectados? * (selecciona todos)">
+        <Field label="¿Para qué van los fondos recolectados? * (selecciona todos)">
           {DESTINOS.map(cat => (
             <div key={cat.cat} style={{ marginBottom:12 }}>
               <div style={{ fontSize:11, fontWeight:800, color:C.muted, textTransform:"uppercase", marginBottom:6 }}>{cat.cat}</div>
@@ -1186,7 +1186,7 @@ function DonacionesSection({ online, onToast }: SectionProps) {
 
         {fc.destinos.length > 0 && (
           <div style={{ background:C.greenLt, borderRadius:10, padding:12, marginBottom:14 }}>
-            <div style={{ fontSize:11, fontWeight:700, color:C.green, marginBottom:6 }}>✓ Esta campaña cubre:</div>
+            <div style={{ fontSize:11, fontWeight:700, color:C.green, marginBottom:6 }}> Esta campaña cubre:</div>
             <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
               {fc.destinos.map((d: string) => { const cc=catForDestino(d); return <Pill key={d} label={d} color={cc.color} bg={cc.bg} />; })}
             </div>
@@ -1194,7 +1194,7 @@ function DonacionesSection({ online, onToast }: SectionProps) {
         )}
 
         <div style={{ background:C.bg, borderRadius:10, padding:14, marginBottom:14 }}>
-          <div style={{ fontSize:12, fontWeight:800, marginBottom:10 }}>💰 ¿Cómo pueden donarles a ustedes?</div>
+          <div style={{ fontSize:12, fontWeight:800, marginBottom:10 }}>¿Cómo pueden donarles a ustedes?</div>
           <Field label="Zelle (email o teléfono)"><Input value={fc.zelle} onChange={v=>setFc(x=>({...x,zelle:v}))} placeholder="Ej: fundacion@gmail.com" /></Field>
           <Field label="Pago Móvil (banco · CI · teléfono)"><Input value={fc.pagoMovil} onChange={v=>setFc(x=>({...x,pagoMovil:v}))} placeholder="Banesco · V-12345678 · 0414-000-0000" /></Field>
           <Field label="Banco y número de cuenta"><Input value={fc.cuenta} onChange={v=>setFc(x=>({...x,cuenta:v}))} placeholder="Banesco · 0134-0000-00-0000000000" /></Field>
@@ -1209,14 +1209,14 @@ function DonacionesSection({ online, onToast }: SectionProps) {
           </div>
         </Field>
         <Field label="Contacto principal *"><Input value={fc.contacto} onChange={v=>setFc(x=>({...x,contacto:v}))} placeholder="+58 414-000-0000 / @usuario / email" /></Field>
-        <Btn onClick={saveCampana} full color={C.teal}>✓ Publicar Campaña</Btn>
+        <Btn onClick={saveCampana} full color={C.teal}> Publicar Campaña</Btn>
       </Card>
     </div>
   );
 
   // ── DETALLE CAMPAÑA ────────────────────────────────────────
   if (view === "detalle_campana" && sel) {
-    const tipoLabel: Record<string, string> = { org:"🏛 Organización", persona:"👤 Persona", empresa:"🏢 Empresa", comunidad:"🤝 Colectivo" };
+    const tipoLabel: Record<string, string> = { org:"Organización", persona:"Persona", empresa:"Empresa", comunidad:"Colectivo" };
     return (
       <div>
         <Back onClick={() => { setSel(null); setView("main"); }} />
@@ -1224,12 +1224,12 @@ function DonacionesSection({ online, onToast }: SectionProps) {
           {sel.logo && <img src={sel.logo} alt="" style={{ width:72, height:72, borderRadius:12, objectFit:"cover", marginBottom:12 }} />}
           <Pill label={tipoLabel[sel.tipo]||sel.tipo} color={C.teal} bg={C.tealLt} />
           <h2 style={{ margin:"8px 0 4px", fontSize:20, fontWeight:800 }}>{sel.nombre}</h2>
-          <p style={{ margin:"0 0 4px", fontSize:12, color:C.muted }}>🌍 {sel.pais} · {fmtDate(sel.ts)}</p>
+          <p style={{ margin:"0 0 4px", fontSize:12, color:C.muted }}>{sel.pais} · {fmtDate(sel.ts)}</p>
           {sel.descripcion && <div style={{ background:C.bg, borderRadius:10, padding:12, margin:"12px 0", fontSize:13, lineHeight:1.6 }}>{sel.descripcion}</div>}
 
           {sel.destinos?.length > 0 && (
             <div style={{ marginBottom:14 }}>
-              <div style={{ fontSize:11, fontWeight:700, color:C.muted, textTransform:"uppercase", marginBottom:8 }}>🎯 Esta campaña cubre</div>
+              <div style={{ fontSize:11, fontWeight:700, color:C.muted, textTransform:"uppercase", marginBottom:8 }}>Esta campaña cubre</div>
               <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
                 {sel.destinos.map((d: string) => { const cc=catForDestino(d); return <Pill key={d} label={d} color={cc.color} bg={cc.bg} />; })}
               </div>
@@ -1244,7 +1244,7 @@ function DonacionesSection({ online, onToast }: SectionProps) {
           )}
 
           <div style={{ background:C.bg, borderRadius:10, padding:14, marginBottom:14 }}>
-            <div style={{ fontSize:12, fontWeight:800, marginBottom:10 }}>💰 Donar a esta campaña</div>
+            <div style={{ fontSize:12, fontWeight:800, marginBottom:10 }}>Donar a esta campaña</div>
             {sel.zelle     && <div style={{ marginBottom:8 }}><div style={{ fontSize:11, color:C.muted, fontWeight:600 }}>ZELLE</div><div style={{ fontSize:14, fontWeight:700 }}>{sel.zelle}</div></div>}
             {sel.pagoMovil && <div style={{ marginBottom:8 }}><div style={{ fontSize:11, color:C.muted, fontWeight:600 }}>PAGO MÓVIL</div><div style={{ fontSize:14, fontWeight:700 }}>{sel.pagoMovil}</div></div>}
             {sel.cuenta    && <div style={{ marginBottom:8 }}><div style={{ fontSize:11, color:C.muted, fontWeight:600 }}>TRANSFERENCIA</div><div style={{ fontSize:14, fontWeight:700 }}>{sel.cuenta}</div></div>}
@@ -1278,14 +1278,14 @@ function DonacionesSection({ online, onToast }: SectionProps) {
         </div>
         <div style={{ fontSize:11, opacity:.7, marginTop:6 }}>{dons.filter((d: BaseRecord)=>d.verificado).length} donaciones verificadas · {pendientes} pendientes · {campanas.length} campañas activas</div>
         <div style={{ display:"flex", gap:8, marginTop:14 }}>
-          <button onClick={() => setView("donar")} style={{ flex:1, background:"white", color:C.primary, border:"none", borderRadius:9, padding:"10px", fontWeight:800, fontSize:13, cursor:"pointer" }}>💙 Ya doné — registrar</button>
-          <button onClick={() => setView("campana")} style={{ flex:1, background:"rgba(255,255,255,0.2)", color:"white", border:"2px solid rgba(255,255,255,0.5)", borderRadius:9, padding:"10px", fontWeight:800, fontSize:13, cursor:"pointer" }}>🏛 Crear campaña</button>
+          <button onClick={() => setView("donar")} style={{ flex:1, background:"white", color:C.primary, border:"none", borderRadius:9, padding:"10px", fontWeight:800, fontSize:13, cursor:"pointer" }}>Ya doné — registrar</button>
+          <button onClick={() => setView("campana")} style={{ flex:1, background:"rgba(255,255,255,0.2)", color:"white", border:"2px solid rgba(255,255,255,0.5)", borderRadius:9, padding:"10px", fontWeight:800, fontSize:13, cursor:"pointer" }}>Crear campaña</button>
         </div>
       </div>
 
       {/* SUBTABS */}
       <div style={{ display:"flex", background:"white", borderRadius:12, padding:4, marginBottom:14, gap:4 }}>
-        {[["donaciones","💙 Donaciones"],["campanas","🏛 Campañas"],["desglose","📊 Desglose"]].map(([id,label]) => (
+        {[["donaciones","Donaciones"],["campanas","Campañas"],["desglose","Desglose"]].map(([id,label]) => (
           <button key={id} onClick={() => setTab2(id)} style={{ flex:1, padding:"8px 4px", borderRadius:9, border:"none", background:tab2===id?C.primary:"transparent", color:tab2===id?"white":C.muted, fontWeight:700, fontSize:12, cursor:"pointer", transition:"all .15s" }}>{label}</button>
         ))}
       </div>
@@ -1294,7 +1294,7 @@ function DonacionesSection({ online, onToast }: SectionProps) {
       {tab2 === "donaciones" && (
         <div>
           {dons.length === 0
-            ? <Empty icon="💙" msg="Sé el primero en registrar una donación" />
+            ? <Empty icon={null} msg="Sé el primero en registrar una donación" />
             : dons.map((d: BaseRecord) => (
                 <div key={d.id} style={{ background:"white", borderRadius:12, padding:"12px 14px", marginBottom:8, borderLeft:`4px solid ${d.verificado?C.green:C.amber}`, boxShadow:"0 1px 3px rgba(0,0,0,0.06)" }}>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
@@ -1305,7 +1305,7 @@ function DonacionesSection({ online, onToast }: SectionProps) {
                     </div>
                     <div style={{ textAlign:"right", flexShrink:0, marginLeft:12 }}>
                       <div style={{ fontWeight:900, fontSize:16, color:C.primary }}>{d.moneda==="USD"?"$":""}{parseFloat(d.monto||0).toLocaleString()} {d.moneda}</div>
-                      <Pill label={d.verificado?"✓ Verificada":"⏳ Pendiente"} color={d.verificado?C.green:C.amber} bg={d.verificado?C.greenLt:C.amberLt} />
+                      <Pill label={d.verificado?"Verificada":"Pendiente"} color={d.verificado?C.green:C.amber} bg={d.verificado?C.greenLt:C.amberLt} />
                     </div>
                   </div>
                   {d.destinos?.length > 0 && (
@@ -1325,24 +1325,24 @@ function DonacionesSection({ online, onToast }: SectionProps) {
           {campanas.length === 0
             ? (
               <div style={{ textAlign:"center", padding:"40px 20px" }}>
-                <div style={{ fontSize:44, marginBottom:10 }}>🏛</div>
+                <div style={{ fontSize:44, marginBottom:10 }}></div>
                 <div style={{ fontWeight:700, fontSize:15, marginBottom:6 }}>Sin campañas registradas</div>
                 <p style={{ fontSize:13, color:C.muted, marginBottom:16 }}>¿Eres una org o persona que está recolectando ayuda?<br/>Regístrala aquí para que todos puedan apoyarte.</p>
-                <Btn onClick={() => setView("campana")} color={C.teal}>🏛 Registrar mi campaña</Btn>
+                <Btn onClick={() => setView("campana")} color={C.teal}>Registrar mi campaña</Btn>
               </div>
             )
             : campanas.map((c: BaseRecord) => {
-                const tipoLabel: Record<string, string> = { org:"🏛 Org", persona:"👤 Persona", empresa:"🏢 Empresa", comunidad:"🤝 Colectivo" };
+                const tipoLabel: Record<string, string> = { org:"Org", persona:"Persona", empresa:"Empresa", comunidad:"Colectivo" };
                 return (
                   <div key={c.id} onClick={() => { setSel(c); setView("detalle_campana"); }} style={{ background:"white", borderRadius:12, padding:"14px 16px", marginBottom:10, cursor:"pointer", borderLeft:`4px solid ${C.teal}`, boxShadow:"0 1px 3px rgba(0,0,0,0.07)", display:"flex", gap:12 }}>
                     {c.logo
                       ? <img src={c.logo} alt="" style={{ width:52, height:52, borderRadius:10, objectFit:"cover", flexShrink:0 }} />
-                      : <div style={{ width:52, height:52, borderRadius:10, background:C.tealLt, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, flexShrink:0 }}>🏛</div>
+                      : <div style={{ width:52, height:52, borderRadius:10, background:C.tealLt, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, flexShrink:0 }}></div>
                     }
                     <div style={{ flex:1, minWidth:0 }}>
                       <div style={{ display:"flex", gap:5, marginBottom:5, flexWrap:"wrap" }}>
                         <Pill label={tipoLabel[c.tipo]||c.tipo} color={C.teal} bg={C.tealLt} />
-                        <Pill label={`🌍 ${c.pais}`} color={C.primary} bg={C.primaryLt} />
+                        <Pill label={`${c.pais}`} color={C.primary} bg={C.primaryLt} />
                       </div>
                       <div style={{ fontWeight:800, fontSize:15, marginBottom:2 }}>{c.nombre}</div>
                       {c.descripcion && <div style={{ fontSize:12, color:C.muted, marginBottom:6, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{c.descripcion}</div>}
@@ -1365,7 +1365,7 @@ function DonacionesSection({ online, onToast }: SectionProps) {
       {tab2 === "desglose" && (
         <div>
           <Card style={{ marginBottom:14 }}>
-            <div style={{ fontSize:13, fontWeight:800, marginBottom:12 }}>📊 ¿A dónde va el dinero?</div>
+            <div style={{ fontSize:13, fontWeight:800, marginBottom:12 }}>¿A dónde va el dinero?</div>
             {topDestinos.length === 0
               ? <div style={{ fontSize:13, color:C.muted, textAlign:"center", padding:"20px 0" }}>Sin datos aún — las donaciones verificadas aparecerán aquí</div>
               : topDestinos.map(([dest, totales]) => {
@@ -1421,12 +1421,12 @@ const REFUGIO_IDB_KEY = "refugios";
 
 // Tipos de persona dentro de un refugio
 const TIPOS_PERSONA = [
-  { id:"nino",    label:"Niño/a",         icon:"🧒", color:"#0EA5E9", bg:"#F0F9FF" },
-  { id:"adulto",  label:"Adulto/a",       icon:"🧑", color:"#0D9488", bg:"#F0FDFA" },
-  { id:"mayor",   label:"Adulto mayor",   icon:"👴", color:"#7C3AED", bg:"#F5F3FF" },
-  { id:"embarazada", label:"Embarazada",  icon:"🤱", color:"#D97706", bg:"#FEF3C7" },
-  { id:"discapacidad",label:"Discapacidad/Movilidad reducida",icon:"♿",color:"#2563EB",bg:"#EFF6FF"},
-  { id:"medico",  label:"Con condición médica", icon:"💊", color:"#059669", bg:"#ECFDF5" },
+  { id:"nino",    label:"Niño/a",         color:"#0EA5E9", bg:"#F0F9FF" },
+  { id:"adulto",  label:"Adulto/a",       color:"#0D9488", bg:"#F0FDFA" },
+  { id:"mayor",   label:"Adulto mayor",   color:"#7C3AED", bg:"#F5F3FF" },
+  { id:"embarazada", label:"Embarazada",  color:"#D97706", bg:"#FEF3C7" },
+  { id:"discapacidad",label:"Discapacidad/Movilidad reducida",color:"#2563EB",bg:"#EFF6FF"},
+  { id:"medico",  label:"Con condición médica", color:"#059669", bg:"#ECFDF5" },
 ];
 
 // Necesidades que puede tener un refugio
@@ -1464,7 +1464,7 @@ function RefugiosSection({ online, onToast }: SectionProps) {
 
   // Guardar refugio
   const saveRefugio = async () => {
-    if (!fr.nombre || !fr.contacto) { onToast("⚠ Nombre del refugio y contacto son obligatorios","warn"); return; }
+    if (!fr.nombre || !fr.contacto) { onToast("Nombre del refugio y contacto son obligatorios","warn"); return; }
     const item = {
       ...fr, foto, personas:[], id:uid(), ts:now(), _off:!online,
       estado:"activo",
@@ -1473,12 +1473,12 @@ function RefugiosSection({ online, onToast }: SectionProps) {
     if (!online) addQ({ table:"refugios", action:"insert", data:item });
     await reload(); setView("list"); setFoto(null);
     setFr({ nombre:"",direccion:"",municipio:"",estado:"",pais:"Venezuela",capacidad:"",descripcion:"",lat:null as number | null,lng:null as number | null,necesidades:[] as string[],contactoNombre:"",contacto:"" });
-    onToast(online ? "✓ Refugio registrado" : "💾 Guardado sin internet","ok");
+    onToast(online ? "Refugio registrado" : "Guardado sin internet","ok");
   };
 
   // Guardar persona en refugio
   const savePersona = async () => {
-    if (!fp.nombre && !fp.tipo) { onToast("⚠ Ingresa al menos el tipo de persona","warn"); return; }
+    if (!fp.nombre && !fp.tipo) { onToast("Ingresa al menos el tipo de persona","warn"); return; }
     const refugio = refugios.find(r => r.id === sel!.id);
     if (!refugio) return;
     const persona = { ...fp, foto:fotoPer, id:uid(), ts:now() };
@@ -1489,7 +1489,7 @@ function RefugiosSection({ online, onToast }: SectionProps) {
     setSel(updated);
     setView("detalle"); setFotoPer(null);
     setFp({ nombre:"",tipo:"adulto",edad:"",descripcion:"",estado:"buscando_familia",contactoPropio:"" });
-    onToast("✓ Persona registrada en el refugio","ok");
+    onToast("Persona registrada en el refugio","ok");
   };
 
   // Marcar persona como reunida con familia
@@ -1500,7 +1500,7 @@ function RefugiosSection({ online, onToast }: SectionProps) {
     await IDB.put("refugios", updated);
     await reload();
     setSel(updated);
-    onToast("🎉 ¡Familia reunida! Gracias por actualizar","ok");
+    onToast("¡Familia reunida! Gracias por actualizar","ok");
   };
 
   // Totales para stats
@@ -1526,7 +1526,7 @@ function RefugiosSection({ online, onToast }: SectionProps) {
             {TIPOS_PERSONA.map(t=>(
               <button key={t.id} onClick={()=>setFp(x=>({...x,tipo:t.id}))}
                 style={{padding:"8px",borderRadius:8,border:`2px solid ${fp.tipo===t.id?t.color:C.border}`,background:fp.tipo===t.id?t.bg:"white",color:fp.tipo===t.id?t.color:C.muted,fontWeight:700,fontSize:12,cursor:"pointer",display:"flex",gap:4,alignItems:"center",justifyContent:"center"}}>
-                {t.icon} {t.label}
+                {t.label}
               </button>
             ))}
           </div>
@@ -1550,7 +1550,7 @@ function RefugiosSection({ online, onToast }: SectionProps) {
         <Field label="Teléfono propio o de familiar (si tiene)">
           <Input value={fp.contactoPropio} onChange={v=>setFp(x=>({...x,contactoPropio:v}))} placeholder="+58 414-000-0000" />
         </Field>
-        <Btn onClick={savePersona} full>{online?"Registrar Persona":"💾 Guardar sin internet"}</Btn>
+        <Btn onClick={savePersona} full>{online?"Registrar Persona":"Guardar sin internet"}</Btn>
       </Card>
     </div>
   );
@@ -1584,11 +1584,11 @@ function RefugiosSection({ online, onToast }: SectionProps) {
         <Field label="Descripción del lugar">
           <Textarea value={fr.descripcion} onChange={v=>setFr(x=>({...x,descripcion:v}))} placeholder="Condiciones del lugar, servicios disponibles (agua, electricidad, baños)…" rows={2} />
         </Field>
-        <Field label="📍 Ubicación exacta en el mapa">
+        <Field label="Ubicación exacta en el mapa">
           <MapPicker lat={fr.lat} lng={fr.lng} onPin={(la,ln)=>setFr(x=>({...x,lat:la,lng:ln}))} />
-          {fr.lat != null && fr.lng != null && <p style={{fontSize:11,color:C.green,marginTop:4,fontWeight:600}}>✓ Pin colocado: {fr.lat.toFixed(4)}, {fr.lng.toFixed(4)}</p>}
+          {fr.lat != null && fr.lng != null && <p style={{fontSize:11,color:C.green,marginTop:4,fontWeight:600}}> Pin colocado: {fr.lat.toFixed(4)}, {fr.lng.toFixed(4)}</p>}
         </Field>
-        <Field label="⚠ ¿Qué necesita este refugio?">
+        <Field label="¿Qué necesita este refugio?">
           <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
             {NECESIDADES_REFUGIO.map((n: string)=><Chip key={n} label={n} active={fr.necesidades.includes(n)} onClick={()=>togN(n)} />)}
           </div>
@@ -1599,7 +1599,7 @@ function RefugiosSection({ online, onToast }: SectionProps) {
         <Field label="Contacto *">
           <Input value={fr.contacto} onChange={v=>setFr(x=>({...x,contacto:v}))} placeholder="+58 414-000-0000 / @usuario" />
         </Field>
-        <Btn onClick={saveRefugio} full>{online?"Publicar Refugio":"💾 Guardar sin internet"}</Btn>
+        <Btn onClick={saveRefugio} full>{online?"Publicar Refugio":"Guardar sin internet"}</Btn>
       </Card>
     </div>
   );
@@ -1619,17 +1619,17 @@ function RefugiosSection({ online, onToast }: SectionProps) {
         <Card style={{marginBottom:12}}>
           {sel.foto && <img src={sel.foto} alt="" style={{width:"100%",maxHeight:180,objectFit:"cover",borderRadius:10,marginBottom:12}} />}
           <div style={{display:"flex",gap:6,marginBottom:8,flexWrap:"wrap"}}>
-            <Pill label={sel.estado==="activo"?"🏠 Activo":"✓ Cerrado"} color={sel.estado==="activo"?C.primary:C.muted} bg={sel.estado==="activo"?C.primaryLt:"#F1F5F9"} />
-            {sel._off&&<Pill label="📴 Pendiente sync" color={C.muted} bg="#F1F5F9" />}
+            <Pill label={sel.estado==="activo"?"Activo":"Cerrado"} color={sel.estado==="activo"?C.primary:C.muted} bg={sel.estado==="activo"?C.primaryLt:"#F1F5F9"} />
+            {sel._off&&<Pill label="Pendiente sync" color={C.muted} bg="#F1F5F9" />}
           </div>
           <h2 style={{margin:"0 0 4px",fontSize:19,fontWeight:800}}>{sel.nombre}</h2>
-          {sel.direccion&&<p style={{margin:"0 0 2px",fontSize:13,color:C.muted}}>📍 {sel.direccion}</p>}
-          <p style={{margin:"0 0 2px",fontSize:13,color:C.muted}}>{[sel.municipio,sel.estado,sel.pais].filter(Boolean).join(", ")}</p>
-          {sel.capacidad&&<p style={{margin:"0 0 8px",fontSize:13,color:C.muted}}>👥 Capacidad: {sel.capacidad} personas</p>}
+          {sel.direccion&&<p style={{margin:"0 0 2px",fontSize:13,color:C.muted}}>{sel.direccion}</p>}
+          <p style={{margin:"0 0 2px",fontSize:13,color:C.muted}}>{[sel.municipio,sel.estado,sel.pais].filter(Boolean).join(",")}</p>
+          {sel.capacidad&&<p style={{margin:"0 0 8px",fontSize:13,color:C.muted}}>Capacidad: {sel.capacidad} personas</p>}
           {sel.descripcion&&<div style={{background:C.bg,borderRadius:10,padding:10,marginBottom:10,fontSize:13,lineHeight:1.6}}>{sel.descripcion}</div>}
           {sel.necesidades?.length>0&&(
             <div style={{marginBottom:10}}>
-              <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",marginBottom:6}}>⚠ Necesidades del refugio</div>
+              <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",marginBottom:6}}>Necesidades del refugio</div>
               <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{sel.necesidades.map((n: string)=><Pill key={n} label={n} color={C.amber} bg={C.amberLt} />)}</div>
             </div>
           )}
@@ -1656,7 +1656,7 @@ function RefugiosSection({ online, onToast }: SectionProps) {
         {/* Lista por tipo */}
         {personas.length === 0 ? (
           <div style={{textAlign:"center",padding:"28px 20px",background:"white",borderRadius:12}}>
-            <div style={{fontSize:36,marginBottom:8}}>👥</div>
+            <div style={{fontSize:36,marginBottom:8}}></div>
             <div style={{fontWeight:600,fontSize:14,marginBottom:4}}>Sin personas registradas aún</div>
             <div style={{fontSize:12,color:C.muted}}>Toca el botón de arriba para empezar el registro</div>
           </div>
@@ -1666,7 +1666,7 @@ function RefugiosSection({ online, onToast }: SectionProps) {
               <div key={tipo.id} style={{marginBottom:16}}>
                 {/* Encabezado de tipo */}
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,padding:"8px 12px",background:tipo.bg,borderRadius:10}}>
-                  <span style={{fontSize:20}}>{tipo.icon}</span>
+                  <span style={{fontSize:13,fontWeight:800,color:tipo.color}}>{tipo.label}</span>
                   <span style={{fontWeight:800,fontSize:14,color:tipo.color}}>{tipo.label}</span>
                   <span style={{marginLeft:"auto",fontWeight:900,fontSize:18,color:tipo.color}}>{tipo.lista.length}</span>
                 </div>
@@ -1676,24 +1676,24 @@ function RefugiosSection({ online, onToast }: SectionProps) {
                   <div key={p.id||i} style={{background:"white",borderRadius:10,marginBottom:8,overflow:"hidden",display:"flex",borderLeft:`4px solid ${p.estado==="reunida"?C.green:tipo.color}`,boxShadow:"0 1px 3px rgba(0,0,0,0.07)",opacity:p.estado==="reunida"?.7:1}}>
                     {/* Foto */}
                     <div style={{width:68,minHeight:68,background:tipo.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>
-                      {p.foto ? <img src={p.foto} alt="" style={{width:68,height:68,objectFit:"cover"}} /> : tipo.icon}
+                      {p.foto ? <img src={p.foto} alt="" style={{width:68,height:68,objectFit:"cover"}} /> : <span style={{fontSize:10,fontWeight:700,color:tipo.color,textAlign:"center",padding:4}}>{tipo.label}</span>}
                     </div>
                     {/* Info */}
                     <div style={{padding:"9px 12px",flex:1,minWidth:0}}>
                       <div style={{display:"flex",gap:5,marginBottom:4,alignItems:"center"}}>
                         <Pill
-                          label={p.estado==="reunida"?"🎉 Reunida con familia":p.estado==="sin_contacto"?"Sin datos":"Buscando familia"}
+                          label={p.estado==="reunida"?"Reunida con familia":p.estado==="sin_contacto"?"Sin datos":"Buscando familia"}
                           color={p.estado==="reunida"?C.green:p.estado==="sin_contacto"?C.muted:C.amber}
                           bg={p.estado==="reunida"?C.greenLt:p.estado==="sin_contacto"?"#F1F5F9":C.amberLt}
                         />
                       </div>
                       <div style={{fontWeight:700,fontSize:14}}>{p.nombre||"Nombre desconocido"}</div>
-                      {p.edad&&<div style={{fontSize:12,color:C.muted}}>🎂 {p.edad}</div>}
+                      {p.edad&&<div style={{fontSize:12,color:C.muted}}>{p.edad}</div>}
                       {p.descripcion&&<div style={{fontSize:12,color:C.muted,marginTop:2}}>{p.descripcion}</div>}
-                      {p.contactoPropio&&<div style={{fontSize:12,color:C.primary,fontWeight:600,marginTop:2}}>📞 {p.contactoPropio}</div>}
+                      {p.contactoPropio&&<div style={{fontSize:12,color:C.primary,fontWeight:600,marginTop:2}}>{p.contactoPropio}</div>}
                       {p.estado!=="reunida"&&(
                         <button onClick={()=>marcarReunida(sel.id,p.id)} style={{marginTop:6,background:C.greenLt,border:`1px solid ${C.green}`,color:C.green,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}}>
-                          🎉 Marcar como reunida con familia
+                          Marcar como reunida con familia
                         </button>
                       )}
                     </div>
@@ -1720,19 +1720,19 @@ function RefugiosSection({ online, onToast }: SectionProps) {
 
       {totalPersonas > 0 && (
         <div style={{background:C.greenLt,border:`1px solid ${C.green}`,borderRadius:10,padding:"10px 14px",marginBottom:12,fontSize:12,fontWeight:600,color:C.green}}>
-          🎉 {totalReunidas} persona{totalReunidas!==1?"s":""} ya {totalReunidas!==1?"fueron reunidas":"fue reunida"} con su familia
+          {totalReunidas} persona{totalReunidas!==1?"s":""} ya {totalReunidas!==1?"fueron reunidas":"fue reunida"} con su familia
         </div>
       )}
 
       {/* Buscar + botón */}
       <div style={{display:"flex",gap:8,marginBottom:14}}>
-        <input value={q} onChange={e=>setQ(e.target.value)} placeholder="🔍 Buscar por nombre, municipio, estado…"
+        <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar por nombre, municipio, estado…"
           style={{flex:1,padding:"10px 12px",borderRadius:8,border:`1.5px solid ${C.border}`,fontSize:13,outline:"none"}} />
         <Btn onClick={()=>setView("form_refugio")} small>+ Refugio</Btn>
       </div>
 
       {filtered.length === 0
-        ? <Empty icon="🏠" msg={refugios.length===0?"Sin refugios registrados aún":"Sin resultados"} />
+        ? <Empty icon={null} msg={refugios.length===0?"Sin refugios registrados aún":"Sin resultados"} />
         : filtered.map(r => {
             const personas   = r.personas || [];
             const buscando   = personas.filter((p: BaseRecord)=>p.estado==="buscando_familia").length;
@@ -1750,12 +1750,12 @@ function RefugiosSection({ online, onToast }: SectionProps) {
 
                 <div style={{padding:"12px 14px"}}>
                   <div style={{display:"flex",gap:5,marginBottom:6,flexWrap:"wrap"}}>
-                    <Pill label="🏠 Activo" color={C.primary} bg={C.primaryLt} />
-                    {r.lat&&<Pill label="🗺 GPS" color={C.teal} bg={C.tealLt} />}
-                    {r._off&&<Pill label="📴" color={C.muted} bg="#F1F5F9" />}
+                    <Pill label="Activo" color={C.primary} bg={C.primaryLt} />
+                    {r.lat&&<Pill label="GPS" color={C.teal} bg={C.tealLt} />}
+                    {r._off&&<Pill label="" color={C.muted} bg="#F1F5F9" />}
                   </div>
                   <div style={{fontWeight:800,fontSize:16,marginBottom:2}}>{r.nombre}</div>
-                  <div style={{fontSize:12,color:C.muted,marginBottom:8}}>{[r.municipio,r.estado,r.pais].filter(Boolean).join(", ")}</div>
+                  <div style={{fontSize:12,color:C.muted,marginBottom:8}}>{[r.municipio,r.estado,r.pais].filter(Boolean).join(",")}</div>
 
                   {/* Contador principal */}
                   <div style={{display:"flex",gap:8,marginBottom:8}}>
@@ -1817,7 +1817,7 @@ export default function CrisisVE() {
 
   useEffect(()=>{
     setPending(getQ().length);
-    const up=()=>{ setOnline(true); const q=getQ(); if(q.length){ setToast({msg:`🔄 Conexión restaurada — sincronizando ${q.length} reporte(s)…`,type:"ok"}); setTimeout(()=>{ clearQ(); setPending(0); },2500); } };
+    const up=()=>{ setOnline(true); const q=getQ(); if(q.length){ setToast({msg:`Conexión restaurada — sincronizando ${q.length} reporte(s)…`,type:"ok"}); setTimeout(()=>{ clearQ(); setPending(0); },2500); } };
     const down=()=>setOnline(false);
     window.addEventListener("online",up);
     window.addEventListener("offline",down);
@@ -1833,7 +1833,10 @@ export default function CrisisVE() {
       <div style={{background:`linear-gradient(135deg, ${C.primary} 0%, ${C.sky} 100%)`,color:"white",padding:"13px 16px 11px",position:"sticky",top:0,zIndex:100,boxShadow:"0 2px 12px rgba(37,99,235,0.3)"}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
           <div>
-            <div style={{fontWeight:900,fontSize:17,letterSpacing:"-0.4px"}}>🇻🇪 Reconstruyendo Venezuela</div>
+            <div style={{display:'flex', alignItems:'center', gap:8}}>
+              <img src="/Reconstruyendo.svg" alt="Logo" width={36} height={36} style={{borderRadius:6}} />
+              <span style={{fontWeight:900,fontSize:17,letterSpacing:'-0.4px'}}>Reconstruyendo Venezuela</span>
+            </div>
             <div style={{fontSize:10,opacity:.85,marginTop:1}}>Coordinación de Emergencias · Venezuela</div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:5,fontSize:10,fontWeight:700}}>
@@ -1865,7 +1868,7 @@ export default function CrisisVE() {
       </div>
 
       <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:680,background:"white",borderTop:`1px solid ${C.border}`,padding:"8px 16px",textAlign:"center",fontSize:10,color:C.muted,zIndex:80}}>
-        🔒 Información humanitaria · Funciona sin internet · #ReconstruyendoVenezuelaJuntos
+        Información humanitaria · Funciona sin internet · #ReconstruyendoVenezuelaJuntos
       </div>
 
       {toast && <Toast msg={toast.msg} type={toast.type} onClose={()=>setToast(null)} />}
