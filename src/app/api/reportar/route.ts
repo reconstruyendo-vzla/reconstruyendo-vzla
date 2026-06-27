@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ratelimit } from '@/lib/ratelimit'
-import { validatePersona, validateZona, validateRefugio, validateDonacion, validateVoluntario, validateMascota, sanitize } from '@/lib/validate'
+import { validatePersona, validateZona, validateRefugio, validateDonacion, validateVoluntario, validateMascota, validateAliado, sanitize } from '@/lib/validate'
 import { createClient } from '@supabase/supabase-js'
 
 export async function POST(req: NextRequest) {
@@ -31,6 +31,7 @@ export async function POST(req: NextRequest) {
     else if (table === 'donaciones') errors = validateDonacion(data)
     else if (table === 'voluntarios') errors = validateVoluntario(data)
     else if (table === 'mascotas') errors = validateMascota(data)
+    else if (table === 'aliados') errors = validateAliado(data)
     else return NextResponse.json({ error: 'Tabla no válida' }, { status: 400 })
 
     if (errors.length > 0) {
@@ -48,6 +49,8 @@ export async function POST(req: NextRequest) {
       direccion: data.direccion ? sanitize(data.direccion) : undefined,
       municipio: data.municipio ? sanitize(data.municipio) : undefined,
       mensaje: data.mensaje ? sanitize(data.mensaje) : undefined,
+      pais: data.pais ? sanitize(data.pais) : undefined,
+      telefono: data.telefono ? sanitize(data.telefono) : undefined,
     }
 
     const { data: result, error } = await supabase

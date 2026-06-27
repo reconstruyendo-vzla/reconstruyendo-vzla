@@ -52,6 +52,27 @@ export function validateMascota(data: any) {
   return errors
 }
 
+export function validateAliado(data: any) {
+  const errors: string[] = []
+  if (!data.nombre || data.nombre.trim().length < 2) errors.push('Nombre de empresa o fundación inválido')
+  if (!data.pais || data.pais.trim().length < 2) errors.push('País inválido')
+  if (!data.contactoNombre || data.contactoNombre.trim().length < 2) errors.push('Nombre de contacto inválido')
+  if (!data.contacto || data.contacto.trim().length < 6) errors.push('WhatsApp o teléfono inválido')
+  if (data.tipo === 'fijo') {
+    if (!data.montoFijo || isNaN(parseFloat(data.montoFijo))) errors.push('Monto fijo inválido')
+    else if (parseFloat(data.montoFijo) <= 0) errors.push('El monto debe ser mayor a 0')
+    else if (parseFloat(data.montoFijo) > 10000000) errors.push('Monto fuera de rango')
+  } else if (data.tipo === 'match') {
+    if (!data.porcentaje || isNaN(parseFloat(data.porcentaje))) errors.push('Porcentaje inválido')
+    else if (parseFloat(data.porcentaje) <= 0 || parseFloat(data.porcentaje) > 100) errors.push('El porcentaje debe estar entre 1 y 100')
+    if (!data.hasta || isNaN(parseFloat(data.hasta))) errors.push('Límite máximo inválido')
+    else if (parseFloat(data.hasta) <= 0) errors.push('El límite debe ser mayor a 0')
+  } else {
+    errors.push('Tipo de aporte inválido')
+  }
+  return errors
+}
+
 export function sanitize(str: string): string {
   if (!str) return ''
   return str

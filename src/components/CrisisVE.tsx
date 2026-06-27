@@ -34,7 +34,7 @@ type LeafletControl = { onAdd: (map: LeafletMap) => HTMLElement; addTo: (map: Le
 
 type ToastType = "ok" | "warn" | "green" | string
 type SectionProps = { online: boolean; onToast: (msg: string, type?: ToastType) => void }
-type StoreName = "personas" | "mascotas" | "zonas" | "voluntarios" | "donaciones" | "refugios"
+type StoreName = "personas" | "mascotas" | "zonas" | "voluntarios" | "donaciones" | "refugios" | "aliados"
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type BaseRecord = { id: string; ts?: string; _off?: boolean; [key: string]: any }
 type QueuePatch = Record<string, unknown>
@@ -73,10 +73,10 @@ const IDB = {
   async open(): Promise<IDBDatabase> {
     if (this.db) return this.db;
     return new Promise((res, rej) => {
-      const req = indexedDB.open("crisisve_v3", 1);
+      const req = indexedDB.open("crisisve_v3", 2);
       req.onupgradeneeded = (e) => {
         const db = (e.target as IDBOpenDBRequest).result;
-        ["personas","mascotas","zonas","voluntarios","donaciones","refugios"].forEach(s => {
+        ["personas","mascotas","zonas","voluntarios","donaciones","refugios","aliados"].forEach(s => {
           if (!db.objectStoreNames.contains(s)) db.createObjectStore(s, { keyPath: "id" });
         });
       };
@@ -1055,44 +1055,82 @@ function calcTotalesPorDestino(dons: BaseRecord[]) {
 
 type Aliado = {
   id: string
+  ts?: string
   nombre: string
+  pais: string
   logo: string
   tipo: "match" | "fijo"
   porcentaje?: number
   hasta?: number
+  montoFijo?: number
   aportado: number
+  contactoNombre: string
   contacto: string
-  descripcion: string
+  descripcion?: string
+  verificado: boolean
+  _off?: boolean
 }
 
-const ALIADOS_INICIALES: Aliado[] = [
-  { id: "1", nombre: "Tu empresa aquí", logo: "", tipo: "match", porcentaje: 25, hasta: 50000, aportado: 0, contacto: "reconstruyendovzla26@gmail.com", descripcion: "Únete como aliado y duplica el impacto de cada donación" },
-]
-
 const ALIADO_COLORS = ["#2563EB", "#0EA5E9", "#0D9488", "#7C3AED", "#D97706"]
+
+function recordToAliado(r: BaseRecord): Aliado {
+  return {
+    id: r.id,
+    ts: r.ts,
+    nombre: r.nombre,
+    pais: r.pais || "",
+    logo: r.logo || "",
+    tipo: r.tipo === "match" ? "match" : "fijo",
+    porcentaje: r.porcentaje != null ? Number(r.porcentaje) : undefined,
+    hasta: r.hasta != null ? Number(r.hasta) : undefined,
+    montoFijo: r.montoFijo != null ? Number(r.montoFijo) : undefined,
+    aportado: Number(r.aportado || 0),
+    contactoNombre: r.contactoNombre || "",
+    contacto: r.contacto || "",
+    descripcion: r.descripcion || "",
+    verificado: !!r.verificado,
+    _off: r._off,
+  }
+}
 
 function aliadoIniciales(nombre: string) {
   return nombre.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]?.toUpperCase() || "").join("")
 }
 
 function calcAliadosStats(aliados: Aliado[]) {
-  const totalAportado = aliados.reduce((s, a) => s + (a.aportado || 0), 0)
-  const totalMatches = aliados.filter(a => a.tipo === "match").reduce((s, a) => s + (a.aportado || 0), 0)
+  const verified = aliados.filter(a => a.verificado)
+  const totalAportado = verified.reduce((s, a) => s + (a.aportado || 0), 0)
+  const totalMatches = verified.filter(a => a.tipo === "match").reduce((s, a) => s + (a.aportado || 0), 0)
   return { totalAportado, totalMatches, count: aliados.length }
 }
 
 function DonacionesSection({ online, onToast }: SectionProps) {
   const [dons, setDons] = useState<BaseRecord[]>([])
-  const [aliados] = useState<Aliado[]>(ALIADOS_INICIALES)
-  const [view, setView] = useState("main") // main | donar
+  const [aliados, setAliados] = useState<Aliado[]>([])
+  const [view, setView] = useState("main") // main | donar | aliado
   const [tab2, setTab2] = useState("donaciones") // donaciones | aliados | desglose
   const [comp, setComp] = useState<string | null>(null)
 
   // Form donación
   const [fd, setFd] = useState({ monto:"", moneda:"USD", metodo:"Zelle", nombre:"", mensaje:"", destinos:[] as string[] })
+  // Form aliado
+  const [fa, setFa] = useState({
+    nombre: "",
+    pais: "",
+    tipoAporte: "fijo" as "fijo" | "match",
+    montoFijo: "",
+    porcentaje: "",
+    hasta: "",
+    contactoNombre: "",
+    telefono: "",
+  })
 
   const reload = useCallback(async () => setDons(await IDB.getAll("donaciones")), [])
-  useEffect(() => { reload() }, [reload])
+  const reloadAliados = useCallback(async () => {
+    const rows = await IDB.getAll("aliados")
+    setAliados(rows.map(recordToAliado))
+  }, [])
+  useEffect(() => { reload(); reloadAliados() }, [reload, reloadAliados])
 
   const togD = (v: string) => setFd(x => ({ ...x, destinos: x.destinos.includes(v) ? x.destinos.filter((d: string) => d !== v) : [...x.destinos, v] }))
 
@@ -1104,7 +1142,6 @@ function DonacionesSection({ online, onToast }: SectionProps) {
   const totalRecaudado = totalUSD + totalMatches
   const metaUSD = 10000
   const pctMeta = Math.min((totalRecaudado / metaUSD) * 100, 100)
-  const mailtoAliado = "mailto:reconstruyendovzla26@gmail.com?subject=" + encodeURIComponent("Quiero ser aliado de Reconstruyendo Venezuela")
 
   const saveDon = async () => {
     if (!fd.monto || !fd.nombre) { onToast("Monto y nombre son obligatorios", "warn"); return; }
@@ -1117,6 +1154,45 @@ function DonacionesSection({ online, onToast }: SectionProps) {
     setFd({ monto:"", moneda:"USD", metodo:"Zelle", nombre:"", mensaje:"", destinos:[] as string[] });
     onToast("¡Gracias! Tu donación fue registrada y se verificará pronto.", "ok");
   };
+
+  const saveAliado = async () => {
+    if (!fa.nombre.trim() || !fa.pais.trim() || !fa.contactoNombre.trim() || !fa.telefono.trim()) {
+      onToast("Completa todos los campos obligatorios", "warn"); return
+    }
+    if (fa.tipoAporte === "fijo" && (!fa.montoFijo || parseFloat(fa.montoFijo) <= 0)) {
+      onToast("Ingresa un monto fijo válido en USD", "warn"); return
+    }
+    if (fa.tipoAporte === "match" && (!fa.porcentaje || !fa.hasta || parseFloat(fa.porcentaje) <= 0 || parseFloat(fa.hasta) <= 0)) {
+      onToast("Ingresa porcentaje y límite máximo válidos", "warn"); return
+    }
+    const item: BaseRecord = {
+      id: uid(),
+      ts: now(),
+      nombre: fa.nombre.trim(),
+      pais: fa.pais.trim(),
+      logo: "",
+      tipo: fa.tipoAporte,
+      porcentaje: fa.tipoAporte === "match" ? parseFloat(fa.porcentaje) : undefined,
+      hasta: fa.tipoAporte === "match" ? parseFloat(fa.hasta) : undefined,
+      montoFijo: fa.tipoAporte === "fijo" ? parseFloat(fa.montoFijo) : undefined,
+      aportado: 0,
+      contactoNombre: fa.contactoNombre.trim(),
+      contacto: fa.telefono.trim(),
+      descripcion: fa.tipoAporte === "match"
+        ? `Match del ${fa.porcentaje}% hasta $${parseFloat(fa.hasta).toLocaleString("es-VE")} USD`
+        : `Aporte fijo de $${parseFloat(fa.montoFijo).toLocaleString("es-VE")} USD`,
+      verificado: false,
+      _off: !online,
+    }
+    if (!(await reportarSeguro("aliados", item, online, onToast))) return
+    await IDB.put("aliados", item)
+    if (!online) addQ({ table: "aliados", action: "insert", data: item })
+    await reloadAliados()
+    setView("main")
+    setTab2("aliados")
+    setFa({ nombre: "", pais: "", tipoAporte: "fijo", montoFijo: "", porcentaje: "", hasta: "", contactoNombre: "", telefono: "" })
+    onToast("¡Registro recibido! Aparecerás como aliado pendiente de verificación.", "ok")
+  }
 
   // ── FORM DONACIÓN ──────────────────────────────────────────
   if (view === "donar") return (
@@ -1186,6 +1262,57 @@ function DonacionesSection({ online, onToast }: SectionProps) {
     </div>
   );
 
+  // ── FORM ALIADO ────────────────────────────────────────────
+  if (view === "aliado") return (
+    <div>
+      <Back onClick={() => setView("main")} />
+      <Card>
+        <h3 style={{ margin: "0 0 4px", fontWeight: 800 }}>Registrarme como aliado</h3>
+        <p style={{ margin: "0 0 14px", fontSize: 12, color: C.muted }}>
+          Tu empresa o fundación aparecerá en la lista con estado &quot;Pendiente de verificación&quot; hasta que el equipo lo apruebe.
+        </p>
+
+        <Field label="Nombre de la empresa o fundación *">
+          <Input value={fa.nombre} onChange={v => setFa(x => ({ ...x, nombre: v }))} placeholder="Ej: Fundación Manos Unidas" />
+        </Field>
+        <Field label="País *">
+          <Input value={fa.pais} onChange={v => setFa(x => ({ ...x, pais: v }))} placeholder="Ej: Venezuela, Estados Unidos…" />
+        </Field>
+
+        <Field label="Tipo de aporte *">
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <Chip label="Monto fijo" active={fa.tipoAporte === "fijo"} onClick={() => setFa(x => ({ ...x, tipoAporte: "fijo" }))} color={C.teal} />
+            <Chip label="Match porcentual" active={fa.tipoAporte === "match"} onClick={() => setFa(x => ({ ...x, tipoAporte: "match" }))} color={C.primary} />
+          </div>
+        </Field>
+
+        {fa.tipoAporte === "fijo" ? (
+          <Field label="Monto en USD *">
+            <Input value={fa.montoFijo} onChange={v => setFa(x => ({ ...x, montoFijo: v }))} placeholder="Ej: 10000" type="number" />
+          </Field>
+        ) : (
+          <>
+            <Field label="Porcentaje de match (%) *">
+              <Input value={fa.porcentaje} onChange={v => setFa(x => ({ ...x, porcentaje: v }))} placeholder="Ej: 25" type="number" />
+            </Field>
+            <Field label="Límite máximo en USD *">
+              <Input value={fa.hasta} onChange={v => setFa(x => ({ ...x, hasta: v }))} placeholder="Ej: 50000" type="number" />
+            </Field>
+          </>
+        )}
+
+        <Field label="Nombre del contacto *">
+          <Input value={fa.contactoNombre} onChange={v => setFa(x => ({ ...x, contactoNombre: v }))} placeholder="Ej: María García" />
+        </Field>
+        <Field label="WhatsApp o teléfono de contacto *">
+          <Input value={fa.telefono} onChange={v => setFa(x => ({ ...x, telefono: v }))} placeholder="+58 414-000-0000" />
+        </Field>
+
+        <Btn onClick={saveAliado} full color={C.primary}>Registrarme como aliado</Btn>
+      </Card>
+    </div>
+  );
+
   // ── MAIN VIEW ──────────────────────────────────────────────
   const topDestinos = Object.entries(totalesPorDestino)
     .sort((a,b) => ((b[1] as {usd:number;bs:number}).usd + (b[1] as {usd:number;bs:number}).bs/40000) - ((a[1] as {usd:number;bs:number}).usd + (a[1] as {usd:number;bs:number}).bs/40000))
@@ -1232,7 +1359,7 @@ function DonacionesSection({ online, onToast }: SectionProps) {
         <div style={{ fontSize: 11, opacity: 0.7, marginTop: 4 }}>Meta: ${metaUSD.toLocaleString('es-VE')} USD · Cada dólar reconstruye hogares</div>
         <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
           <button onClick={() => setView('donar')} style={{ flex: 1, background: 'white', color: '#1D4ED8', border: 'none', borderRadius: 9, padding: '10px', fontWeight: 800, fontSize: 13, cursor: 'pointer' }}>Ya doné — registrar</button>
-          <a href={mailtoAliado} style={{ flex: 1, background: 'rgba(255,255,255,0.15)', color: 'white', border: '2px solid rgba(255,255,255,0.45)', borderRadius: 9, padding: '10px', fontWeight: 800, fontSize: 13, cursor: 'pointer', textAlign: 'center', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Quiero ser aliado</a>
+          <button onClick={() => setView('aliado')} style={{ flex: 1, background: 'rgba(255,255,255,0.15)', color: 'white', border: '2px solid rgba(255,255,255,0.45)', borderRadius: 9, padding: '10px', fontWeight: 800, fontSize: 13, cursor: 'pointer' }}>Quiero ser aliado</button>
         </div>
       </div>
 
@@ -1288,12 +1415,14 @@ function DonacionesSection({ online, onToast }: SectionProps) {
                 <div style={{ fontSize: 20, fontWeight: 800 }}>${totalMatches.toLocaleString('es-VE')}</div>
               </div>
             </div>
-            <a href={mailtoAliado} style={{ display: 'block', background: 'white', color: '#1D4ED8', textAlign: 'center', padding: '12px', borderRadius: 10, fontWeight: 800, fontSize: 14, textDecoration: 'none' }}>
+            <button onClick={() => setView("aliado")} style={{ display: 'block', width: '100%', background: 'white', color: '#1D4ED8', textAlign: 'center', padding: '12px', borderRadius: 10, fontWeight: 800, fontSize: 14, border: 'none', cursor: 'pointer' }}>
               Quiero ser aliado
-            </a>
+            </button>
           </div>
 
-          {aliados.map((a, idx) => {
+          {aliados.length === 0 ? (
+            <Empty icon={null} msg="Sé el primero en registrarte como aliado" />
+          ) : aliados.map((a, idx) => {
             const color = ALIADO_COLORS[idx % ALIADO_COLORS.length]
             const matchPct = a.tipo === "match" && a.hasta ? Math.min((a.aportado / a.hasta) * 100, 100) : 0
             return (
@@ -1304,17 +1433,31 @@ function DonacionesSection({ online, onToast }: SectionProps) {
                     : <div style={{ width: 52, height: 52, borderRadius: '50%', background: color, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 16, flexShrink: 0 }}>{aliadoIniciales(a.nombre)}</div>
                   }
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 4 }}>{a.nombre}</div>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 4 }}>
+                      <div style={{ fontWeight: 800, fontSize: 15 }}>{a.nombre}</div>
+                      <Pill
+                        label={a.verificado ? "Verificado" : "Pendiente de verificación"}
+                        color={a.verificado ? C.green : C.amber}
+                        bg={a.verificado ? C.greenLt : C.amberLt}
+                      />
+                    </div>
+                    {a.pais && <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>{a.pais}</div>}
                     {a.tipo === "match" ? (
                       <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>
                         <span style={{ fontWeight: 700, color: color }}>Match {a.porcentaje}%</span>
                         {a.hasta ? <> · Hasta ${a.hasta.toLocaleString('es-VE')}</> : null}
                       </div>
                     ) : (
-                      <div style={{ fontSize: 12, fontWeight: 700, color: color, marginBottom: 4 }}>Aportó ${a.aportado.toLocaleString('es-VE')}</div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: color, marginBottom: 4 }}>
+                        {a.verificado
+                          ? `Aportó $${a.aportado.toLocaleString('es-VE')}`
+                          : `Compromiso: $${(a.montoFijo || 0).toLocaleString('es-VE')} USD`}
+                      </div>
                     )}
                     {a.descripcion && <div style={{ fontSize: 12, color: C.muted, marginBottom: 8, lineHeight: 1.5 }}>{a.descripcion}</div>}
-                    <div style={{ fontSize: 13, fontWeight: 700, color: C.txt }}>Aportado: ${a.aportado.toLocaleString('es-VE')} USD</div>
+                    {a.verificado && (
+                      <div style={{ fontSize: 13, fontWeight: 700, color: C.txt }}>Aportado: ${a.aportado.toLocaleString('es-VE')} USD</div>
+                    )}
                     {a.tipo === "match" && a.hasta ? (
                       <div style={{ marginTop: 8 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: C.muted, marginBottom: 4 }}>
