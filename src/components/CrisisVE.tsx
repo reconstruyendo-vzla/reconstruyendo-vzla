@@ -133,6 +133,7 @@ async function guardarEnSupabase(
   const { error } = await request.select().single()
 
   if (error) {
+    console.error('Supabase error:', error.message, error.code)
     await IDB.put(table, item)
     addQ({
       table,
@@ -141,7 +142,12 @@ async function guardarEnSupabase(
       id: mode === 'upsert' ? item.id : undefined,
       patch: mode === 'upsert' ? item : undefined,
     })
-    onToast('Guardado sin conexión', 'warn')
+    const msg = error.code === '42501'
+      ? 'Sin permiso en Supabase — revisa las políticas RLS'
+      : navigator.onLine
+        ? `No se pudo publicar: ${error.message}`
+        : 'Guardado sin conexión'
+    onToast(msg, 'warn')
     return false
   }
 

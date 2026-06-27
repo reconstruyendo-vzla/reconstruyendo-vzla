@@ -6,7 +6,7 @@ import { createClient } from '@supabase/supabase-js'
 
 export async function POST(req: NextRequest) {
   try {
-    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
       return NextResponse.json({ error: 'Servicio no disponible' }, { status: 503 })
     }
 
@@ -49,12 +49,17 @@ export async function POST(req: NextRequest) {
 
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     )
+
+    const row = {
+      id: (sanitized as { id?: string }).id,
+      record: sanitized,
+    }
 
     const { data: result, error } = await supabase
       .from(table)
-      .insert(sanitized as Record<string, unknown>)
+      .insert(row)
       .select()
       .single()
 

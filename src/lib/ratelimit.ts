@@ -35,10 +35,7 @@ export async function checkRateLimit(
   key: string
 ): Promise<{ success: boolean; limited: boolean }> {
   if (!limiter) {
-    // Sin Redis en producción: rechazar para evitar abuso ilimitado
-    if (process.env.NODE_ENV === 'production') {
-      return { success: false, limited: true }
-    }
+    // Sin Upstash Redis no hay rate limit (la app guarda directo en Supabase con RLS)
     return { success: true, limited: false }
   }
   const { success } = await limiter.limit(key)

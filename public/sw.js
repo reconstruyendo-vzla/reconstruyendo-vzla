@@ -1,4 +1,4 @@
-const CACHE = 'rvzla-v2';
+const CACHE = 'rvzla-v3';
 const STATIC = [
   '/',
   '/manifest.json',
@@ -23,6 +23,14 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
+  const url = new URL(e.request.url);
+
+  // Siempre pedir bundles nuevos de Next.js (evita JS viejo en caché)
+  if (url.pathname.startsWith('/_next/')) {
+    e.respondWith(fetch(e.request));
+    return;
+  }
+
   e.respondWith(
     fetch(e.request)
       .then(res => {
