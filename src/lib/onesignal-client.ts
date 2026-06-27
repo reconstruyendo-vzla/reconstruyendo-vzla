@@ -34,8 +34,13 @@ export function isStandalonePWA(): boolean {
   return window.matchMedia('(display-mode: standalone)').matches || nav.standalone === true
 }
 
+/** iOS Safari en pestaña normal: Apple exige añadir a inicio. Android/Chrome NO necesitan instalar. */
 export function needsIOSInstallStep(): boolean {
   return isIOSDevice() && !isStandalonePWA()
+}
+
+export function puedeAlertasEnNavegador(): boolean {
+  return !needsIOSInstallStep()
 }
 
 export function registerOneSignalDeferred(cb: (OneSignal: OneSignalSDK) => void | Promise<void>) {
@@ -52,6 +57,8 @@ export function initOneSignalSDK(): void {
       return
     }
 
+    const enNavegador = puedeAlertasEnNavegador()
+
     await OneSignal.init({
       appId,
       allowLocalhostAsSecureOrigin: true,
@@ -64,13 +71,13 @@ export function initOneSignalSDK(): void {
           prompts: [
             {
               type: 'push',
-              autoPrompt: !needsIOSInstallStep(),
+              autoPrompt: enNavegador,
               text: {
-                actionMessage: 'Recibe alertas EN VIVO de zonas críticas en Venezuela',
-                acceptButton: 'Activar alertas',
-                cancelButton: 'Ahora no',
+                actionMessage: 'EMERGENCIA: ¿Recibir alertas de zonas críticas en Venezuela?',
+                acceptButton: 'Sí, activar',
+                cancelButton: 'No',
               },
-              delay: { pageViews: 1, timeDelay: 4 },
+              delay: { pageViews: 1, timeDelay: 1 },
             },
           ],
         },
@@ -79,15 +86,25 @@ export function initOneSignalSDK(): void {
   })
 }
 
-export async function waitForOneSignal(maxMs = 10000): Promise<OneSignalSDK | null> {
+export async function waitForOneSignal(maxMs = 12000): Promise<OneSignalSDK | null> {
   if (typeof window === 'undefined') return null
   const start = Date.now()
   while (Date.now() - start < maxMs) {
     const os = window.OneSignal
     if (os) return os
-    await new Promise((r) => setTimeout(r, 250))
+    await new Promise((r) => setTimeout(r, 200))
   }
   return window.OneSignal ?? null
+}
+
+export async function estaSuscritoPush(): Promise<boolean> {
+  const OneSignal = await waitForOneSignal(6000)
+  if (!OneSignal) return false
+  try {
+    return Boolean(OneSignal.User.PushSubscription.optedIn)
+  } catch {
+    return false
+  }
 }
 
 export async function activarNotificacionesPush(): Promise<'ok' | 'denied' | 'unsupported' | 'ios-install'> {
@@ -99,20 +116,40 @@ export async function activarNotificacionesPush(): Promise<'ok' | 'denied' | 'un
   const supported = await OneSignal.Notifications.isPushSupported()
   if (!supported) return 'unsupported'
 
+  const granted = await OneSignal.Notifications.requestPermission()
+  if (granted) return 'ok'
+
   try {
     await OneSignal.Slidedown.promptPush({ force: true })
+    const retry = await OneSignal.Notifications.requestPermission()
+    return retry ? 'ok' : 'denied'
   } catch {
-    /* slidedown opcional */
+    return 'denied'
   }
-
-  const granted = await OneSignal.Notifications.requestPermission()
-  return granted ? 'ok' : 'denied'
 }
 
-export async function estaSuscritoPush(): Promise<boolean> {
-  const OneSignal = await waitForOneSignal(5000)
-  if (!OneSignal) return false
-  return Boolean(OneSignal.User.PushSubscription.optedIn)
+/** Pide permiso si aún no está suscrito — para emergencias al primer toque */
+export async function asegurarAlertasEmergencia(): Promise<boolean> {
+  if (await estaSuscritoPush()) return true
+  if (!puedeAlertasEnNavegador()) return false
+  return (await activarNotificacionesPush()) === 'ok'
+}
+
+export function escucharPrimerToqueParaAlertas(onActivado?: () => void) {
+  if (typeof document === 'undefined' || needsIOSInstallStep()) return () => {}
+
+  const handler = async () => {
+    const ok = await asegurarAlertasEmergencia()
+    if (ok) onActivado?.()
+  }
+
+  document.addEventListener('click', handler, { once: true, capture: true })
+  document.addEventListener('touchend', handler, { once: true, capture: true })
+
+  return () => {
+    document.removeEventListener('click', handler, { capture: true })
+    document.removeEventListener('touchend', handler, { capture: true })
+  }
 }
 
 declare global {

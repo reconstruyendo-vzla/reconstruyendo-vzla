@@ -31,10 +31,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Título y mensaje son obligatorios' }, { status: 400 })
     }
 
-    const payload = {
+    const payload: Record<string, unknown> = {
       app_id: process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID,
       target_channel: 'push',
-      included_segments: ['Subscribed Users'],
+      included_segments: ['Subscribed Users', 'Total Subscriptions'],
       headings: { en: title, es: title },
       contents: { en: message, es: message },
       url,
@@ -44,7 +44,6 @@ export async function POST(req: NextRequest) {
       chrome_web_badge: ICON,
       priority: 10,
       ttl: 3600,
-      android_channel_id: process.env.ONESIGNAL_ANDROID_CHANNEL_ID || undefined,
     }
 
     const response = await fetch('https://onesignal.com/api/v1/notifications', {

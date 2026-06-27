@@ -18,9 +18,12 @@ import {
 } from '@/lib/offline-sync'
 import {
   activarNotificacionesPush,
+  asegurarAlertasEmergencia,
+  escucharPrimerToqueParaAlertas,
   estaSuscritoPush,
   initOneSignalSDK,
   needsIOSInstallStep,
+  puedeAlertasEnNavegador,
 } from '@/lib/onesignal-client'
 
 type ToastType = "ok" | "warn" | "green" | string
@@ -155,15 +158,20 @@ function NotificacionesBanner({ onToast }: { onToast: (msg: string, type?: Toast
   const [estado, setEstado] = useState<'loading' | 'ios-install' | 'off' | 'on'>('loading')
   const [activando, setActivando] = useState(false)
 
-  useEffect(() => {
+  const revisar = useCallback(async () => {
     if (needsIOSInstallStep()) {
       setEstado('ios-install')
       return
     }
-    estaSuscritoPush()
-      .then((sub) => setEstado(sub ? 'on' : 'off'))
-      .catch(() => setEstado('off'))
+    const sub = await estaSuscritoPush()
+    setEstado(sub ? 'on' : 'off')
   }, [])
+
+  useEffect(() => {
+    revisar()
+    const t = setInterval(revisar, 4000)
+    return () => clearInterval(t)
+  }, [revisar])
 
   const activar = async () => {
     setActivando(true)
@@ -171,17 +179,17 @@ function NotificacionesBanner({ onToast }: { onToast: (msg: string, type?: Toast
       const r = await activarNotificacionesPush()
       if (r === 'ok') {
         setEstado('on')
-        onToast('Alertas EN VIVO activadas — recibirás zonas críticas al instante', 'ok')
+        onToast('Listo — recibirás alertas de emergencia al instante', 'ok')
       } else if (r === 'ios-install') {
         setEstado('ios-install')
-        onToast('En iPhone: Compartir → Añadir a pantalla de inicio, luego activa alertas', 'warn')
       } else if (r === 'denied') {
-        onToast('Permiso denegado. Actívalo en Ajustes → Notificaciones', 'warn')
+        onToast('Toca el candado en la barra del navegador → Permitir notificaciones', 'warn')
       } else {
-        onToast('Tu navegador no soporta alertas push', 'warn')
+        onToast('Usa Chrome en Android o un navegador compatible', 'warn')
       }
     } finally {
       setActivando(false)
+      revisar()
     }
   }
 
@@ -189,28 +197,40 @@ function NotificacionesBanner({ onToast }: { onToast: (msg: string, type?: Toast
 
   return (
     <div style={{
-      background: estado === 'ios-install' ? C.skyLt : C.primaryLt,
-      borderBottom: `1px solid ${estado === 'ios-install' ? C.sky : C.primaryMd}`,
-      padding: '10px 14px',
-      fontSize: 12,
+      background: '#DC2626',
+      color: 'white',
+      padding: '12px 14px',
+      fontSize: 13,
+      position: 'sticky',
+      top: 0,
+      zIndex: 200,
+      boxShadow: '0 2px 12px rgba(0,0,0,0.2)',
     }}>
       {estado === 'ios-install' ? (
         <div>
-          <div style={{ fontWeight: 800, color: C.txt, marginBottom: 4 }}>iPhone / iPad: instala la app primero</div>
-          <div style={{ color: C.muted, lineHeight: 1.5 }}>
-            Safari → Compartir → <strong>Añadir a pantalla de inicio</strong>. Luego abre la app e activa alertas.
+          <div style={{ fontWeight: 900, marginBottom: 6 }}>iPhone: un paso extra (solo Apple)</div>
+          <div style={{ lineHeight: 1.5, opacity: 0.95, fontSize: 12 }}>
+            Safari → Compartir → <strong>Añadir a pantalla de inicio</strong> → abrir el icono → Permitir alertas.
           </div>
         </div>
       ) : (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'space-between', flexWrap: 'wrap' }}>
-          <div style={{ flex: 1, minWidth: 180 }}>
-            <div style={{ fontWeight: 800, color: C.primaryDk }}>Alertas de zonas críticas EN VIVO</div>
-            <div style={{ color: C.muted, marginTop: 2 }}>Android, Chrome y iOS (app instalada)</div>
+        <>
+          <div style={{ fontWeight: 900, fontSize: 14, marginBottom: 4 }}>
+            EMERGENCIA — Activa alertas de zonas críticas
           </div>
-          <Btn onClick={activar} small disabled={activando} color={C.primary}>
-            {activando ? 'Activando…' : 'Activar alertas'}
+          <div style={{ fontSize: 12, opacity: 0.95, marginBottom: 10, lineHeight: 1.45 }}>
+            <strong>No descargues nada.</strong> Solo toca el botón y acepta en el navegador (Chrome, Android, etc.).
+          </div>
+          <Btn
+            onClick={activar}
+            full
+            disabled={activando}
+            color="#FFFFFF"
+            style={{ color: '#DC2626', fontWeight: 900, fontSize: 15 }}
+          >
+            {activando ? 'Espera…' : 'PERMITIR ALERTAS AHORA'}
           </Btn>
-        </div>
+        </>
       )}
     </div>
   )
@@ -1958,6 +1978,12 @@ export default function CrisisVE() {
 
   useEffect(() => {
     initOneSignalSDK()
+    const cleanup = escucharPrimerToqueParaAlertas()
+    if (puedeAlertasEnNavegador()) {
+      const t = setTimeout(() => { asegurarAlertasEmergencia() }, 2500)
+      return () => { clearTimeout(t); cleanup() }
+    }
+    return cleanup
   }, []);
 
   useEffect(() => {
@@ -1985,6 +2011,8 @@ export default function CrisisVE() {
   return (
     <div style={{fontFamily:"'Segoe UI',system-ui,-apple-system,sans-serif",background:C.bg,minHeight:"100vh",color:C.txt,maxWidth:680,margin:"0 auto",position:"relative"}}>
 
+      <NotificacionesBanner onToast={onToast} />
+
       {/* HEADER */}
       <div style={{background:"white",borderBottom:"1px solid #E2E8F0",color:"#0F172A",padding:"13px 16px 11px",position:"sticky",top:0,zIndex:100}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
@@ -2001,7 +2029,6 @@ export default function CrisisVE() {
         </div>
       </div>
 
-      <NotificacionesBanner onToast={onToast} />
       <OfflineBanner pending={pending} syncing={syncing} />
 
       {/* TABS */}
