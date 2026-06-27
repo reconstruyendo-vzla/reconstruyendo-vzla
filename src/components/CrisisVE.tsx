@@ -1811,7 +1811,7 @@ export default function CrisisVE() {
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
           <div>
             <div style={{display:'flex', alignItems:'center', gap:8}}>
-              <img src="/Reconstruyendo.svg" alt="Reconstruyendo Venezuela" height={40} width={155} style={{objectFit:'contain'}} />
+              <img src="/Reconstruyendo.svg" alt="Reconstruyendo Venezuela" style={{ height: 44, width: 'auto', display: 'block' }} />
             </div>
             <div style={{fontSize:10,color:"#0F172A",opacity:.75,marginTop:1}}>Coordinación de Emergencias · Venezuela</div>
           </div>
