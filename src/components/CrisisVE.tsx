@@ -86,6 +86,16 @@ const URGENCIAS = [
 
 const REMOTE_ESPECIALIDADES = ["Psicólogo/a", "Abogado/a", "Médico/a"];
 
+/** Mensajes claros — transparencia para todos */
+const MSG_PUBLICA_AUTO =
+  '✓ Guardado. TODO se publicará automáticamente cuando tengas señal — visible para todos en la web.'
+const MSG_BTN_SIN_SENAL = 'GUARDAR — se publica solo con señal'
+const MSG_PILL_PENDIENTE = 'Se publicará con señal'
+
+function btnPublicar(online: boolean, conInternet: string): string {
+  return online ? conInternet : MSG_BTN_SIN_SENAL
+}
+
 async function publicarReporte(
   table: SupabaseTable,
   item: BaseRecord,
@@ -95,8 +105,8 @@ async function publicarReporte(
 ): Promise<boolean> {
   const {
     mode = 'insert',
-    okMsg = 'Publicado correctamente',
-    offlineMsg = '✓ Guardado en TU teléfono. Aparece en la lista. Se sube a la red cuando haya internet.',
+    okMsg = '✓ Publicado — visible para todos en la web',
+    offlineMsg = MSG_PUBLICA_AUTO,
   } = options
   const row = { id: item.id, record: item }
 
@@ -257,21 +267,30 @@ function NotificacionesBanner({ onToast }: { onToast: (msg: string, type?: Toast
   )
 }
 
-function OfflineBanner({pending, syncing, online}:{pending:number; syncing?:boolean; online?:boolean}){
-  if (online === false) {
-    return (
-      <div style={{background:"#FEF2F2",borderBottom:"2px solid #DC2626",padding:"10px 14px",fontSize:12,fontWeight:700,color:"#DC2626",textAlign:"center",lineHeight:1.45}}>
-        SIN INTERNET — Al guardar, envía un SMS a bomberos o coordinación
-        {pending > 0 ? ` · ${pending} pendiente(s) de subir` : ""}
-      </div>
-    );
-  }
-  if (!pending && !syncing) return null;
+function TransparenciaBanner({ online, pending, syncing }: { online: boolean; pending: number; syncing?: boolean }) {
+  if (online && pending === 0 && !syncing) return null
   return (
-    <div style={{background:C.amberLt,borderBottom:`1px solid ${C.amber}`,padding:"8px 14px",fontSize:12,fontWeight:600,color:C.amber,textAlign:"center"}}>
-      {syncing ? "Sincronizando datos…" : `${pending} reporte(s) pendiente(s) de publicar`}
+    <div style={{
+      background: syncing || (online && pending > 0) ? C.primaryLt : '#FEF2F2',
+      borderBottom: `2px solid ${syncing || (online && pending > 0) ? C.primary : '#DC2626'}`,
+      padding: '11px 14px',
+      fontSize: 13,
+      fontWeight: 700,
+      lineHeight: 1.5,
+      textAlign: 'center',
+      color: syncing || (online && pending > 0) ? C.primaryDk : '#B91C1C',
+    }}>
+      {syncing
+        ? '⏳ Publicando automáticamente — todos lo verán en la web…'
+        : !online
+          ? '📡 Sin señal ahora — TODO lo que guardes se publicará SOLO cuando tengas señal. Visible para todos.'
+          : `⏳ ${pending} reporte(s) por publicar — se suben solos automáticamente`}
     </div>
-  );
+  )
+}
+
+function OfflineBanner({pending, syncing, online}:{pending:number; syncing?:boolean; online?:boolean}){
+  return <TransparenciaBanner online={online === true} pending={pending} syncing={syncing} />
 }
 
 // ============================================================
@@ -412,7 +431,7 @@ async function actualizarPersona(
   const redReal = await hayInternetReal()
   if (!redReal) {
     addQ({ table: 'personas', action: 'update', id, patch })
-    onToast('Actualizado en tu teléfono ✓ Se subirá cuando haya internet', 'ok')
+    onToast('Actualizado — se publicará para todos cuando haya señal', 'ok')
     return updated
   }
 
@@ -425,7 +444,7 @@ async function actualizarPersona(
   } catch (e) {
     console.error('actualizarPersona error:', e)
     addQ({ table: 'personas', action: 'update', id, patch })
-    onToast('Guardado en tu teléfono ✓ Se sincronizará en breve', 'ok')
+    onToast('Actualizado — se publicará automáticamente con señal', 'ok')
     return updated
   }
 }
@@ -637,8 +656,7 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
         created_at: new Date().toISOString(),
       }
       const ok = await publicarReporte("personas", item, online, onToast, {
-        okMsg: "Persona publicada — visible para coordinadores",
-        offlineMsg: "✓ Guardado en tu teléfono. Toca ENVIAR SMS para avisar a coordinación.",
+        okMsg: "✓ Publicado — visible para todos en la web",
       });
       if (!ok) return;
       await reload();
@@ -800,7 +818,7 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
           <p style={{margin:"0 0 14px",fontSize:12,color:C.muted,lineHeight:1.5}}>
             {online
               ? "El GPS se fija solo desde este teléfono. Los coordinadores usan tu contacto para ir al lugar."
-              : "Sin internet: se guarda aquí y se sube cuando haya red. El GPS se toma automáticamente de este teléfono."}
+              : "Sin señal: se guarda aquí y se publica sola para todos cuando vuelva la conexión."}
           </p>
 
           <Field label="Ubicación del reporte (GPS automático) *">
@@ -843,7 +861,7 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
           <Field label="Última ubicación (texto, opcional)"><Input value={f.ubicacion} onChange={v=>setF(x=>({...x,ubicacion:v}))} placeholder="Ej: Sector Las Flores, La Guaira" /></Field>
           <Field label="País"><Input value={f.pais} onChange={v=>setF(x=>({...x,pais:v}))} placeholder="Venezuela" /></Field>
           <Field label="Descripción (ropa, señas, situación)"><Textarea value={f.descripcion} onChange={v=>setF(x=>({...x,descripcion:v}))} placeholder="Camisa azul, cabello corto…" /></Field>
-          <Btn onClick={save} full disabled={saving}>{saving?"Guardando…":online?"Publicar Reporte":"GUARDAR EN MI TELÉFONO"}</Btn>
+          <Btn onClick={save} full disabled={saving}>{saving ? "Guardando…" : btnPublicar(online, "Publicar Reporte")}</Btn>
         </Card>
         {compartir && (
           <CompartirSinInternet item={compartir} onClose={() => setCompartir(null)} onToast={onToast} />
@@ -862,8 +880,8 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
   return (
     <div>
       {!online && (
-        <div style={{background:C.redLt,border:`1px solid ${C.red}`,borderRadius:12,padding:12,marginBottom:12,fontSize:13,lineHeight:1.5}}>
-          <strong style={{color:C.red}}>Sin internet:</strong> guarda el reporte aquí y luego toca <strong>Enviar SMS</strong> para avisar a coordinación.
+        <div style={{background:C.primaryLt,border:`2px solid ${C.primary}`,borderRadius:12,padding:12,marginBottom:12,fontSize:13,lineHeight:1.5,color:C.primaryDk}}>
+          <strong>Todo se publicará automáticamente cuando tengas señal.</strong> Todos lo verán en reconstruyendovzla.com. También puedes enviar SMS mientras tanto.
         </div>
       )}
       {localizadas > 0 && (
@@ -909,7 +927,7 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
               <div style={{display:"flex",gap:4,marginBottom:4,flexWrap:"wrap"}}>
                 <Pill label={est.label} color={est.color} bg={est.bg} />
                 <Pill label={cat.label} color={cat.color} bg={cat.bg} />
-                {p._off&&<Pill label="En tu teléfono" color={C.amber} bg={C.amberLt} />}
+                {p._off&&<Pill label={MSG_PILL_PENDIENTE} color={C.amber} bg={C.amberLt} />}
               </div>
               <div style={{fontWeight:800,fontSize:15,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.nombre}</div>
               {p.estado==='resuelto' && p.lleva_nombre && <div style={{fontSize:12,color:C.green,fontWeight:600}}>Con: {p.lleva_nombre} → {p.destino}</div>}
@@ -1166,7 +1184,7 @@ function ZonasSection({ online, onToast, dataVersion }: SectionProps) {
 
     if (!online || !navigator.onLine) {
       addQ(queueItem)
-      onToast('Zona guardada ✓ Ahora envía el SMS', 'ok')
+      onToast('Zona guardada — se publicará sola cuando tengas señal', 'ok')
       setAlertaCompartir(item)
     } else {
       try {
@@ -1186,7 +1204,7 @@ function ZonasSection({ online, onToast, dataVersion }: SectionProps) {
       } catch (e: unknown) {
         console.error('saveZona error:', e)
         addQ(queueItem)
-        onToast('Zona guardada ✓ Envía SMS a coordinación', 'ok')
+        onToast('Zona guardada — se publicará automáticamente con señal', 'ok')
         setAlertaCompartir(item)
       }
     }
@@ -1302,7 +1320,7 @@ function ZonasSection({ online, onToast, dataVersion }: SectionProps) {
         <Field label="Personal que se solicita"><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{PERSONAL.map((i: string) => <Chip key={i} label={i} active={f.personal.includes(i)} onClick={() => tog("personal", i)} />)}</div></Field>
         <Field label="Coordinador de zona"><Input value={f.contactoNombre} onChange={v => setF(x => ({ ...x, contactoNombre: v }))} placeholder="Nombre de quien coordina" /></Field>
         <Field label="Contacto *"><Input value={f.contacto} onChange={v => setF(x => ({ ...x, contacto: v }))} placeholder="+58 414-000-0000 / @usuario" /></Field>
-        <Btn onClick={saveZona} full>{online ? "Publicar Zona de Crisis" : "Guardar sin internet"}</Btn>
+        <Btn onClick={saveZona} full>{btnPublicar(online, "Publicar Zona de Crisis")}</Btn>
       </Card>
     </div>
   );
@@ -1349,7 +1367,7 @@ function ZonasSection({ online, onToast, dataVersion }: SectionProps) {
                 <Pill label={u.label} color={u.color} bg={u.bg} />
                 <Pill label={z.estado_zona === "activa" ? "Activa" : "Atendida"} color={z.estado_zona === "activa" ? C.primary : C.green} bg={z.estado_zona === "activa" ? C.primaryLt : C.greenLt} />
                 {z.lat && <Pill label="GPS" color={C.teal} bg={C.tealLt} />}
-                {z._off && <Pill label="" color={C.muted} bg="#F1F5F9" />}
+                {z._off && <Pill label={MSG_PILL_PENDIENTE} color={C.amber} bg={C.amberLt} />}
               </div>
               <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 2 }}>{z.nombre}</div>
               <div style={{ fontSize: 12, color: C.muted, marginBottom: 6 }}>{[z.estado, z.pais].filter(Boolean).join(",")}</div>
@@ -1436,7 +1454,7 @@ function MascotasSection({ online, onToast, dataVersion }: SectionProps) {
         </Field>
         <Field label="Tu nombre"><Input value={f.contactoNombre} onChange={v=>setF(x=>({...x,contactoNombre:v}))} placeholder="Quien reporta" /></Field>
         <Field label="Contacto *"><Input value={f.contacto} onChange={v=>setF(x=>({...x,contacto:v}))} placeholder="+58 414-000-0000" /></Field>
-        <Btn onClick={save} full>{online?"Publicar":"Guardar sin internet"}</Btn>
+        <Btn onClick={save} full>{btnPublicar(online, "Publicar")}</Btn>
       </Card>
     </div>
   );
@@ -1547,7 +1565,7 @@ function VoluntariosSection({ online, onToast, dataVersion }: SectionProps) {
         </Field>
         <Field label="Sobre ti (opcional)"><Textarea value={f.bio} onChange={v=>setF(x=>({...x,bio:v}))} placeholder="Experiencia, equipamiento disponible…" rows={2} /></Field>
         <Field label="Contacto *"><Input value={f.contacto} onChange={v=>setF(x=>({...x,contacto:v}))} placeholder="+58 414-000-0000 / @usuario / email" /></Field>
-        <Btn onClick={save} full color={C.teal}>{online?"Registrarme":"Guardar sin internet"}</Btn>
+        <Btn onClick={save} full color={C.teal}>{btnPublicar(online, "Registrarme")}</Btn>
       </Card>
     </div>
   );
@@ -2153,7 +2171,7 @@ function RefugiosSection({ online, onToast, dataVersion }: SectionProps) {
         <Field label="Teléfono propio o de familiar (si tiene)">
           <Input value={fp.contactoPropio} onChange={v=>setFp(x=>({...x,contactoPropio:v}))} placeholder="+58 414-000-0000" />
         </Field>
-        <Btn onClick={savePersona} full>{online?"Registrar Persona":"Guardar sin internet"}</Btn>
+        <Btn onClick={savePersona} full>{btnPublicar(online, "Registrar Persona")}</Btn>
       </Card>
     </div>
   );
@@ -2201,7 +2219,7 @@ function RefugiosSection({ online, onToast, dataVersion }: SectionProps) {
         <Field label="Contacto *">
           <Input value={fr.contacto} onChange={v=>setFr(x=>({...x,contacto:v}))} placeholder="+58 414-000-0000 / @usuario" />
         </Field>
-        <Btn onClick={saveRefugio} full>{online?"Publicar Refugio":"Guardar sin internet"}</Btn>
+        <Btn onClick={saveRefugio} full>{btnPublicar(online, "Publicar Refugio")}</Btn>
       </Card>
     </div>
   );
@@ -2222,7 +2240,7 @@ function RefugiosSection({ online, onToast, dataVersion }: SectionProps) {
           {sel.foto && <img src={sel.foto} alt="" style={{width:"100%",maxHeight:180,objectFit:"cover",borderRadius:10,marginBottom:12}} />}
           <div style={{display:"flex",gap:6,marginBottom:8,flexWrap:"wrap"}}>
             <Pill label={(sel.estado_refugio ?? sel.estado)==="activo"?"Activo":"Cerrado"} color={(sel.estado_refugio ?? sel.estado)==="activo"?C.primary:C.muted} bg={(sel.estado_refugio ?? sel.estado)==="activo"?C.primaryLt:"#F1F5F9"} />
-            {sel._off&&<Pill label="Pendiente sync" color={C.muted} bg="#F1F5F9" />}
+            {sel._off&&<Pill label={MSG_PILL_PENDIENTE} color={C.amber} bg={C.amberLt} />}
           </div>
           <h2 style={{margin:"0 0 4px",fontSize:19,fontWeight:800}}>{sel.nombre}</h2>
           {sel.direccion&&<p style={{margin:"0 0 2px",fontSize:13,color:C.muted}}>{sel.direccion}</p>}
@@ -2354,7 +2372,7 @@ function RefugiosSection({ online, onToast, dataVersion }: SectionProps) {
                   <div style={{display:"flex",gap:5,marginBottom:6,flexWrap:"wrap"}}>
                     <Pill label="Activo" color={C.primary} bg={C.primaryLt} />
                     {r.lat&&<Pill label="GPS" color={C.teal} bg={C.tealLt} />}
-                    {r._off&&<Pill label="" color={C.muted} bg="#F1F5F9" />}
+                    {r._off&&<Pill label={MSG_PILL_PENDIENTE} color={C.amber} bg={C.amberLt} />}
                   </div>
                   <div style={{fontWeight:800,fontSize:16,marginBottom:2}}>{r.nombre}</div>
                   <div style={{fontSize:12,color:C.muted,marginBottom:8}}>{[r.municipio,r.estado,r.pais].filter(Boolean).join(",")}</div>
@@ -2437,14 +2455,19 @@ export default function CrisisVE() {
       const { downloaded, synced, failed, notified } = await sincronizarTodo()
       setPending(getQ().length)
       setDataVersion((v) => v + 1)
-      if (!silent) {
-        if (synced > 0 && failed > 0) {
-          onToast(`${synced} publicados. ${failed} aún pendientes.`, 'warn')
-        } else if (synced > 0) {
-          onToast(notified > 0 ? `${synced} publicados · alertas enviadas` : `${synced} reporte(s) publicados`, 'ok')
-        } else if (downloaded > 0 && pendingBefore === 0) {
-          onToast('Datos actualizados', 'ok')
-        }
+      if (synced > 0) {
+        onToast(
+          silent
+            ? `✓ ${synced} publicado(s) automáticamente — todos lo ven ya`
+            : notified > 0
+              ? `${synced} publicados · alertas enviadas`
+              : `✓ ${synced} publicado(s) — visible para todos`,
+          'ok'
+        )
+      } else if (!silent && failed > 0 && pendingBefore > 0) {
+        onToast(`${failed} reporte(s) aún por publicar — se intentará solo`, 'warn')
+      } else if (!silent && downloaded > 0 && pendingBefore === 0) {
+        onToast('Datos actualizados', 'ok')
       }
     } catch (e) {
       console.error('sincronizar error:', e)
@@ -2474,26 +2497,36 @@ export default function CrisisVE() {
         setOnline(false)
         return
       }
-      setOnline(await hayInternetReal())
+      const red = await hayInternetReal()
+      setOnline(red)
+      if (red && getQ().length > 0) sincronizar(true)
     }
     probe()
-    const onUp = () => { probe(); sincronizar() }
+    const onUp = () => { probe() }
     const onDown = () => setOnline(false)
     window.addEventListener('online', onUp)
     window.addEventListener('offline', onDown)
-    const iv = setInterval(probe, 30000)
+    const iv = setInterval(probe, pending > 0 ? 10000 : 30000)
     return () => {
       window.removeEventListener('online', onUp)
       window.removeEventListener('offline', onDown)
       clearInterval(iv)
     }
+  }, [sincronizar, pending])
+
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === 'visible') sincronizar(true)
+    }
+    window.addEventListener('visibilitychange', onVis)
+    return () => window.removeEventListener('visibilitychange', onVis)
   }, [sincronizar])
 
   useEffect(() => {
-    if (!online) return
-    const t = setInterval(() => sincronizar(true), 120000)
+    const ms = pending > 0 ? 15000 : 90000
+    const t = setInterval(() => sincronizar(true), ms)
     return () => clearInterval(t)
-  }, [online, sincronizar])
+  }, [pending, sincronizar])
 
   return (
     <div style={{fontFamily:"'Segoe UI',system-ui,-apple-system,sans-serif",background:C.bg,minHeight:"100vh",color:C.txt,maxWidth:680,margin:"0 auto",position:"relative"}}>
@@ -2511,7 +2544,7 @@ export default function CrisisVE() {
           </div>
           <div style={{display:"flex",alignItems:"center",gap:5,fontSize:10,fontWeight:700}}>
             <div style={{width:7,height:7,borderRadius:"50%",background:online?C.green:C.amber,flexShrink:0}} />
-            <span style={{color:"#0F172A"}}>{online?"En línea":"Sin conexión"}{pending>0?` · ${pending} pendientes`:""}</span>
+            <span style={{color:"#0F172A"}}>{online?"En línea — todo se publica en vivo":"Sin señal — se publica solo al reconectar"}{pending>0?` · ${pending} por publicar`:""}</span>
           </div>
         </div>
       </div>
@@ -2539,7 +2572,7 @@ export default function CrisisVE() {
 
       <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:680,background:"white",borderTop:`1px solid ${C.border}`,padding:"8px 16px",zIndex:80}}>
         <div style={{textAlign:'center', fontSize:10, color:C.muted}}>
-          Información humanitaria · Funciona sin internet · #ReconstruyendoVenezuelaJuntos
+          Transparencia total · Se publica automáticamente con señal · #ReconstruyendoVenezuelaJuntos
           <br/>
           reconstruyendovzla26@gmail.com
         </div>

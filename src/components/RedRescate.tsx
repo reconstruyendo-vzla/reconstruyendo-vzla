@@ -83,11 +83,10 @@ export function RedRescate({ zonas, online, onToast, alertaRecienGuardada, onCer
         }}
       >
         <div style={{ fontWeight: 900, fontSize: 16, color: C.red, marginBottom: 8 }}>
-          Sin internet — avisa por mensaje de texto
+          Se publicará para todos cuando haya señal
         </div>
         <p style={{ margin: '0 0 14px', fontSize: 14, lineHeight: 1.55, color: C.txt }}>
-          Lo que guardes queda en este teléfono. Para que bomberos y coordinación se enteren, envía un <strong>SMS</strong> con
-          los datos (funciona aunque no haya datos móviles, solo señal de llamadas).
+          Todo lo guardado <strong>se sube solo</strong> al reconectar. Mientras no hay señal, envía un <strong>SMS</strong> para avisar ya a coordinación.
         </p>
 
         {pendientes.length > 0 ? (

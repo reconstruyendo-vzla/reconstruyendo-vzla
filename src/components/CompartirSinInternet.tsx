@@ -63,7 +63,7 @@ export function CompartirSinInternet({
           {esNino ? 'Avisar sobre esta persona' : 'Avisar sobre esta zona'}
         </div>
         <p style={{ fontSize: 14, color: C.muted, marginBottom: 16, lineHeight: 1.5 }}>
-          Ya quedó guardado en tu teléfono. Ahora envía un mensaje de texto para que coordinación pueda actuar.
+          Se publicará para todos cuando haya señal. Mientras tanto puedes enviar SMS a coordinación.
         </p>
         <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 16, color: '#0F172A' }}>{item.nombre}</div>
 
