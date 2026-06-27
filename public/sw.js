@@ -1,4 +1,4 @@
-const CACHE = 'rvzla-v7';
+const CACHE = 'rvzla-v8';
 const STATIC = [
   '/',
   '/manifest.json',

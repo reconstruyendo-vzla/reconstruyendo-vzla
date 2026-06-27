@@ -1,31 +1,8 @@
-export type OneSignalSDK = {
-  init: (opts: Record<string, unknown>) => Promise<void>
-  Notifications: {
-    isPushSupported: () => Promise<boolean>
-    permission: boolean
-    requestPermission: () => Promise<boolean>
-  }
-  User: {
-    PushSubscription: {
-      optedIn: boolean
-      id?: string | null
-    }
-  }
-  Slidedown: {
-    promptPush: (opts?: { force?: boolean }) => Promise<void>
-  }
-}
-
 const ONESIGNAL_WORKER = 'push/onesignal/OneSignalSDKWorker.js'
 const ONESIGNAL_SCOPE = '/push/onesignal/'
-const PUSH_OK_KEY = 'rvzla_push_ok'
+export const PUSH_OK_KEY = 'rvzla_push_ok'
 
-function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
-  ])
-}
+let oneSignalInitStarted = false
 
 export function isIOSDevice(): boolean {
   if (typeof navigator === 'undefined') return false
@@ -45,22 +22,30 @@ export function needsIOSInstallStep(): boolean {
   return isIOSDevice() && !isStandalonePWA()
 }
 
-export function puedeAlertasEnNavegador(): boolean {
-  return !needsIOSInstallStep()
-}
-
 export function permisoNativoConcedido(): boolean {
   if (typeof window === 'undefined' || !('Notification' in window)) return false
   return Notification.permission === 'granted' || localStorage.getItem(PUSH_OK_KEY) === '1'
 }
 
-export function initOneSignalSDK(): void {
-  if (typeof window === 'undefined') return
+export function marcarPushActivo(): void {
+  try {
+    localStorage.setItem(PUSH_OK_KEY, '1')
+  } catch {
+    /* ignore */
+  }
+  iniciarOneSignalCuandoListo()
+}
+
+/** Solo inicializa OneSignal — NUNCA pide permiso (evita bloqueos) */
+export function iniciarOneSignalCuandoListo(): void {
+  if (typeof window === 'undefined' || oneSignalInitStarted) return
+  oneSignalInitStarted = true
+
+  const appId = process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID
+  if (!appId) return
+
   window.OneSignalDeferred = window.OneSignalDeferred || []
   window.OneSignalDeferred.push(async (OneSignal) => {
-    const appId = process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID
-    if (!appId) return
-
     try {
       await OneSignal.init({
         appId,
@@ -69,19 +54,7 @@ export function initOneSignalSDK(): void {
         serviceWorkerPath: ONESIGNAL_WORKER,
         serviceWorkerUpdaterPath: 'push/onesignal/OneSignalSDKUpdaterWorker.js',
         serviceWorkerParam: { scope: ONESIGNAL_SCOPE },
-        promptOptions: {
-          slidedown: {
-            prompts: [{
-              type: 'push',
-              autoPrompt: false,
-              text: {
-                actionMessage: '¿Recibir alertas de zonas críticas?',
-                acceptButton: 'Sí',
-                cancelButton: 'No',
-              },
-            }],
-          },
-        },
+        promptOptions: { slidedown: { prompts: [{ type: 'push', autoPrompt: false }] } },
       })
       if (permisoNativoConcedido()) {
         OneSignal.Notifications.requestPermission().catch(() => {})
@@ -90,70 +63,93 @@ export function initOneSignalSDK(): void {
       console.error('OneSignal init:', e)
     }
   })
-}
 
-export async function estaSuscritoPush(): Promise<boolean> {
-  if (permisoNativoConcedido()) return true
-  const OS = await withTimeout(waitForOneSignal(4000), 4000, null)
-  if (!OS) return false
-  try {
-    return Boolean(OS.User.PushSubscription.optedIn)
-  } catch {
-    return false
+  if (!document.querySelector('script[src*="OneSignalSDK.page"]')) {
+    const s = document.createElement('script')
+    s.src = 'https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js'
+    s.defer = true
+    document.head.appendChild(s)
   }
 }
 
-async function waitForOneSignal(maxMs: number): Promise<OneSignalSDK | null> {
-  if (typeof window === 'undefined') return null
-  const start = Date.now()
-  while (Date.now() - start < maxMs) {
-    if (window.OneSignal) return window.OneSignal
-    await new Promise((r) => setTimeout(r, 150))
+/**
+ * Pide permiso SOLO con API nativa — sincrónico al clic del usuario.
+ * Devuelve al instante; no usar await largo.
+ */
+export function pedirPermisoNotificaciones(
+  onResult: (ok: boolean) => void
+): void {
+  if (needsIOSInstallStep()) {
+    onResult(false)
+    return
   }
-  return window.OneSignal ?? null
-}
 
-/** Permiso nativo del navegador — funciona en Chrome/Android sin esperar OneSignal */
-export async function activarNotificacionesPush(): Promise<'ok' | 'denied' | 'unsupported' | 'ios-install'> {
-  if (needsIOSInstallStep()) return 'ios-install'
-
-  if (typeof window === 'undefined' || !('Notification' in window)) return 'unsupported'
+  if (typeof window === 'undefined' || !('Notification' in window)) {
+    onResult(false)
+    return
+  }
 
   if (Notification.permission === 'granted') {
-    localStorage.setItem(PUSH_OK_KEY, '1')
-    vincularOneSignalEnFondo()
-    return 'ok'
+    marcarPushActivo()
+    onResult(true)
+    return
   }
 
-  if (Notification.permission === 'denied') return 'denied'
-
-  try {
-    const perm = await withTimeout(
-      Notification.requestPermission(),
-      8000,
-      'denied' as NotificationPermission
-    )
-    if (perm === 'granted') {
-      localStorage.setItem(PUSH_OK_KEY, '1')
-      vincularOneSignalEnFondo()
-      return 'ok'
-    }
-    return 'denied'
-  } catch {
-    return 'denied'
+  if (Notification.permission === 'denied') {
+    onResult(false)
+    return
   }
+
+  Notification.requestPermission()
+    .then((perm) => {
+      if (perm === 'granted') {
+        marcarPushActivo()
+        onResult(true)
+      } else {
+        onResult(false)
+      }
+    })
+    .catch(() => onResult(false))
 }
 
-function vincularOneSignalEnFondo() {
-  waitForOneSignal(20000).then((OS) => {
-    if (!OS) return
-    OS.Notifications.requestPermission().catch(() => {})
-  })
+export function vigilarPermisoNotificaciones(onGranted: () => void): () => void {
+  if (typeof window === 'undefined') return () => {}
+
+  let done = false
+  const check = () => {
+    if (done) return
+    if (Notification.permission === 'granted') {
+      done = true
+      marcarPushActivo()
+      onGranted()
+    }
+  }
+
+  check()
+  const interval = setInterval(check, 400)
+
+  let permStatus: PermissionStatus | null = null
+  if ('permissions' in navigator) {
+    navigator.permissions.query({ name: 'notifications' as PermissionName }).then((s) => {
+      permStatus = s
+      s.onchange = check
+    }).catch(() => {})
+  }
+
+  return () => {
+    clearInterval(interval)
+    if (permStatus) permStatus.onchange = null
+  }
 }
 
 declare global {
   interface Window {
-    OneSignalDeferred?: Array<(OneSignal: OneSignalSDK) => void | Promise<void>>
-    OneSignal?: OneSignalSDK
+    OneSignalDeferred?: Array<(os: {
+      init: (o: Record<string, unknown>) => Promise<void>
+      Notifications: { requestPermission: () => Promise<boolean> }
+    }) => void | Promise<void>>
+    OneSignal?: {
+      Notifications: { requestPermission: () => Promise<boolean> }
+    }
   }
 }

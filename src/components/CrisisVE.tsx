@@ -17,10 +17,11 @@ import {
   sincronizarTodo,
 } from '@/lib/offline-sync'
 import {
-  activarNotificacionesPush,
-  initOneSignalSDK,
+  iniciarOneSignalCuandoListo,
   needsIOSInstallStep,
+  pedirPermisoNotificaciones,
   permisoNativoConcedido,
+  vigilarPermisoNotificaciones,
 } from '@/lib/onesignal-client'
 
 type ToastType = "ok" | "warn" | "green" | string
@@ -173,29 +174,27 @@ function NotificacionesBanner({ onToast }: { onToast: (msg: string, type?: Toast
     if (permisoNativoConcedido()) return 'on'
     return 'off'
   })
-  const [activando, setActivando] = useState(false)
 
-  const activar = async () => {
-    if (activando) return
-    setActivando(true)
-    const liberar = setTimeout(() => setActivando(false), 6000)
+  useEffect(() => {
+    if (permisoNativoConcedido()) return
+    return vigilarPermisoNotificaciones(() => setEstado('on'))
+  }, [])
 
-    try {
-      const r = await activarNotificacionesPush()
-      if (r === 'ok' || permisoNativoConcedido()) {
+  const activar = () => {
+    if (estado === 'on') return
+
+    pedirPermisoNotificaciones((ok) => {
+      if (ok) {
         setEstado('on')
         onToast('Alertas activadas — recibirás zonas críticas al instante', 'ok')
-      } else if (r === 'ios-install') {
+      } else if (needsIOSInstallStep()) {
         setEstado('ios-install')
-      } else if (r === 'denied') {
-        onToast('Permiso denegado. En Chrome: candado → Notificaciones → Permitir', 'warn')
+      } else if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
+        onToast('Bloqueado. Chrome → ⋮ → Configuración del sitio → Notificaciones → Permitir', 'warn')
       } else {
-        onToast('Usa Chrome en Android para recibir alertas', 'warn')
+        onToast('Toca Permitir en el popup del teléfono', 'warn')
       }
-    } finally {
-      clearTimeout(liberar)
-      setActivando(false)
-    }
+    })
   }
 
   if (estado === 'on') return null
@@ -224,16 +223,15 @@ function NotificacionesBanner({ onToast }: { onToast: (msg: string, type?: Toast
             EMERGENCIA — Activa alertas de zonas críticas
           </div>
           <div style={{ fontSize: 12, opacity: 0.95, marginBottom: 10, lineHeight: 1.45 }}>
-            Toca el botón y acepta en el popup. Funciona en Chrome/Android sin descargar nada.
+            Toca el botón → aparece un popup del sistema → elige <strong>Permitir</strong>
           </div>
           <Btn
             onClick={activar}
             full
-            disabled={activando}
             color="#FFFFFF"
             style={{ color: '#DC2626', fontWeight: 900, fontSize: 15 }}
           >
-            {activando ? 'Acepta en el popup ↑' : 'PERMITIR ALERTAS AHORA'}
+            PERMITIR ALERTAS AHORA
           </Btn>
         </>
       )}
@@ -1991,7 +1989,8 @@ export default function CrisisVE() {
   }, [onToast]);
 
   useEffect(() => {
-    initOneSignalSDK()
+    const t = setTimeout(() => iniciarOneSignalCuandoListo(), 3000)
+    return () => clearTimeout(t)
   }, []);
 
   useEffect(() => {
