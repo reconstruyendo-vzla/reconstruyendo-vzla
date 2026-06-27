@@ -9,6 +9,7 @@ import {
   setQ,
   type BaseRecord,
   type QueueItem,
+  type QueueNotify,
   type StoreName,
   type SupabaseTable,
 } from '@/lib/idb-store'
@@ -17,7 +18,7 @@ import {
   notificacionZonaCritica,
   sincronizarTodo,
 } from '@/lib/offline-sync'
-import { hayInternetReal } from '@/lib/network'
+import { hayInternetReal, iniciarVigilanciaConexion, suscribirConexion } from '@/lib/network'
 import {
   iniciarOneSignalCuandoListo,
   needsIOSInstallStep,
@@ -88,12 +89,12 @@ const REMOTE_ESPECIALIDADES = ["Psicólogo/a", "Abogado/a", "Médico/a"];
 
 /** Mensajes claros — transparencia para todos */
 const MSG_PUBLICA_AUTO =
-  '✓ Guardado. TODO se publicará automáticamente cuando tengas señal — visible para todos en la web.'
-const MSG_BTN_SIN_SENAL = 'GUARDAR — se publica solo con señal'
+  '✓ Guardado. La app detectó sin señal — se publicará sola automáticamente para todos.'
+const MSG_BTN_GUARDAR = 'GUARDAR REPORTE'
 const MSG_PILL_PENDIENTE = 'Se publicará con señal'
 
-function btnPublicar(online: boolean, conInternet: string): string {
-  return online ? conInternet : MSG_BTN_SIN_SENAL
+function btnPublicar(_online: boolean, _conInternet: string): string {
+  return MSG_BTN_GUARDAR
 }
 
 async function publicarReporte(
@@ -101,12 +102,13 @@ async function publicarReporte(
   item: BaseRecord,
   _online: boolean,
   onToast: SectionProps['onToast'],
-  options: { mode?: 'insert' | 'upsert'; okMsg?: string; offlineMsg?: string } = {}
+  options: { mode?: 'insert' | 'upsert'; okMsg?: string; offlineMsg?: string; notify?: QueueNotify } = {}
 ): Promise<boolean> {
   const {
     mode = 'insert',
     okMsg = '✓ Publicado — visible para todos en la web',
     offlineMsg = MSG_PUBLICA_AUTO,
+    notify,
   } = options
   const row = { id: item.id, record: item }
 
@@ -127,6 +129,7 @@ async function publicarReporte(
       data: item,
       id: mode === 'upsert' ? item.id : undefined,
       patch: mode === 'upsert' ? item : undefined,
+      ...(notify ? { notify } : {}),
     })
     onToast(offlineMsg, 'ok')
     return true
@@ -154,6 +157,7 @@ async function publicarReporte(
       data: item,
       id: mode === 'upsert' ? item.id : undefined,
       patch: mode === 'upsert' ? item : undefined,
+      ...(notify ? { notify } : {}),
     })
     onToast(offlineMsg, 'ok')
     return true
@@ -267,30 +271,34 @@ function NotificacionesBanner({ onToast }: { onToast: (msg: string, type?: Toast
   )
 }
 
-function TransparenciaBanner({ online, pending, syncing }: { online: boolean; pending: number; syncing?: boolean }) {
-  if (online && pending === 0 && !syncing) return null
+function TransparenciaBanner({ online, pending, syncing, detectando }: { online: boolean; pending: number; syncing?: boolean; detectando?: boolean }) {
+  if (!detectando && online && pending === 0 && !syncing) return null
+
+  let texto: string | null = null
+  if (detectando) texto = 'Detectando señal automáticamente…'
+  else if (syncing) texto = '⏳ Publicando automáticamente — todos lo verán en la web…'
+  else if (!online) texto = '📡 Sin señal detectada — al volver, TODO se publica SOLO. La app lo vigila cada 5 segundos.'
+  else if (pending > 0) texto = `⏳ ${pending} reporte(s) publicándose solos ahora…`
+  if (!texto) return null
+
   return (
     <div style={{
-      background: syncing || (online && pending > 0) ? C.primaryLt : '#FEF2F2',
-      borderBottom: `2px solid ${syncing || (online && pending > 0) ? C.primary : '#DC2626'}`,
+      background: syncing || (online && pending > 0) ? C.primaryLt : detectando ? C.amberLt : '#FEF2F2',
+      borderBottom: `2px solid ${syncing || (online && pending > 0) ? C.primary : detectando ? C.amber : '#DC2626'}`,
       padding: '11px 14px',
       fontSize: 13,
       fontWeight: 700,
       lineHeight: 1.5,
       textAlign: 'center',
-      color: syncing || (online && pending > 0) ? C.primaryDk : '#B91C1C',
+      color: syncing || (online && pending > 0) ? C.primaryDk : detectando ? C.amber : '#B91C1C',
     }}>
-      {syncing
-        ? '⏳ Publicando automáticamente — todos lo verán en la web…'
-        : !online
-          ? '📡 Sin señal ahora — TODO lo que guardes se publicará SOLO cuando tengas señal. Visible para todos.'
-          : `⏳ ${pending} reporte(s) por publicar — se suben solos automáticamente`}
+      {texto}
     </div>
   )
 }
 
-function OfflineBanner({pending, syncing, online}:{pending:number; syncing?:boolean; online?:boolean}){
-  return <TransparenciaBanner online={online === true} pending={pending} syncing={syncing} />
+function OfflineBanner({pending, syncing, online, detectando}:{pending:number; syncing?:boolean; online?:boolean; detectando?:boolean}){
+  return <TransparenciaBanner online={online === true} pending={pending} syncing={syncing} detectando={detectando} />
 }
 
 // ============================================================
@@ -881,7 +889,7 @@ function PersonasSection({ online, onToast, dataVersion }: SectionProps) {
     <div>
       {!online && (
         <div style={{background:C.primaryLt,border:`2px solid ${C.primary}`,borderRadius:12,padding:12,marginBottom:12,fontSize:13,lineHeight:1.5,color:C.primaryDk}}>
-          <strong>Todo se publicará automáticamente cuando tengas señal.</strong> Todos lo verán en reconstruyendovzla.com. También puedes enviar SMS mientras tanto.
+          La app <strong>detectó sin señal</strong>. Todo se publicará <strong>sola</strong> en cuanto detecte conexión — revisa automáticamente cada 5 segundos.
         </div>
       )}
       {localizadas > 0 && (
@@ -1172,41 +1180,15 @@ function ZonasSection({ online, onToast, dataVersion }: SectionProps) {
       estado_zona: 'activa',
       created_at: new Date().toISOString(),
     }
-    const row = { id: item.id, record: item }
-    await IDB.put('zonas', { ...item, _off: true })
-
-    const queueItem: QueueItem = {
-      table: 'zonas',
-      action: 'insert',
-      data: item,
-      ...(f.urgencia === 'critica' ? { notify: notificacionZonaCritica(item) } : {}),
-    }
-
-    if (!online || !navigator.onLine) {
-      addQ(queueItem)
-      onToast('Zona guardada — se publicará sola cuando tengas señal', 'ok')
+    const critica = f.urgencia === 'critica'
+    await publicarReporte('zonas', item, online, onToast, {
+      okMsg: '✓ Zona publicada — visible para todos',
+      ...(critica ? { notify: notificacionZonaCritica(item) } : {}),
+    })
+    if (critica) {
+      const red = await hayInternetReal()
+      if (red) enviarNotificacion(notificacionZonaCritica(item)).catch(() => {})
       setAlertaCompartir(item)
-    } else {
-      try {
-        const { error } = await Promise.race([
-          supabase.from('zonas').insert(row),
-          new Promise<{ error: { message: string } }>((resolve) =>
-            setTimeout(() => resolve({ error: { message: 'timeout' } }), 12000)
-          ),
-        ])
-        if (error) throw error
-        await IDB.put('zonas', { ...item, _off: false })
-        onToast('Zona publicada correctamente', 'ok')
-        if (f.urgencia === 'critica') {
-          enviarNotificacion(notificacionZonaCritica(item)).catch(() => {})
-          setAlertaCompartir(item)
-        }
-      } catch (e: unknown) {
-        console.error('saveZona error:', e)
-        addQ(queueItem)
-        onToast('Zona guardada — se publicará automáticamente con señal', 'ok')
-        setAlertaCompartir(item)
-      }
     }
     await reload()
     setView('list')
@@ -2431,7 +2413,8 @@ function RefugiosSection({ online, onToast, dataVersion }: SectionProps) {
 // ============================================================
 export default function CrisisVE() {
   const [tab, setTab] = useState("personas");
-  const [online, setOnline] = useState(typeof navigator!=="undefined"?navigator.onLine:true);
+  const [online, setOnline] = useState(false);
+  const [detectando, setDetectando] = useState(true);
   const [pending, setPending] = useState(0);
   const [dataVersion, setDataVersion] = useState(0);
   const [syncing, setSyncing] = useState(false);
@@ -2483,36 +2466,26 @@ export default function CrisisVE() {
   }, []);
 
   useEffect(() => {
-    setPending(getQ().length)
-    setDataVersion((v) => v + 1)
-    if (navigator.onLine) sincronizar(true)
-    const onQueue = () => setPending(getQ().length)
-    window.addEventListener('crisisve-queue', onQueue)
-    return () => window.removeEventListener('crisisve-queue', onQueue)
+    iniciarVigilanciaConexion()
+    const unsub = suscribirConexion((tieneSenal) => {
+      setDetectando(false)
+      setOnline(tieneSenal)
+      if (tieneSenal && getQ().length > 0) sincronizar(true)
+    })
+    return unsub
   }, [sincronizar])
 
   useEffect(() => {
-    const probe = async () => {
-      if (!navigator.onLine) {
-        setOnline(false)
-        return
-      }
-      const red = await hayInternetReal()
-      setOnline(red)
-      if (red && getQ().length > 0) sincronizar(true)
+    setPending(getQ().length)
+    setDataVersion((v) => v + 1)
+    sincronizar(true)
+    const onQueue = () => {
+      setPending(getQ().length)
+      if (online) sincronizar(true)
     }
-    probe()
-    const onUp = () => { probe() }
-    const onDown = () => setOnline(false)
-    window.addEventListener('online', onUp)
-    window.addEventListener('offline', onDown)
-    const iv = setInterval(probe, pending > 0 ? 10000 : 30000)
-    return () => {
-      window.removeEventListener('online', onUp)
-      window.removeEventListener('offline', onDown)
-      clearInterval(iv)
-    }
-  }, [sincronizar, pending])
+    window.addEventListener('crisisve-queue', onQueue)
+    return () => window.removeEventListener('crisisve-queue', onQueue)
+  }, [sincronizar, online])
 
   useEffect(() => {
     const onVis = () => {
@@ -2523,7 +2496,7 @@ export default function CrisisVE() {
   }, [sincronizar])
 
   useEffect(() => {
-    const ms = pending > 0 ? 15000 : 90000
+    const ms = pending > 0 ? 8000 : 30000
     const t = setInterval(() => sincronizar(true), ms)
     return () => clearInterval(t)
   }, [pending, sincronizar])
@@ -2543,13 +2516,16 @@ export default function CrisisVE() {
             <div style={{fontSize:10,color:"#0F172A",opacity:.75,marginTop:1}}>Coordinación de Emergencias · Venezuela</div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:5,fontSize:10,fontWeight:700}}>
-            <div style={{width:7,height:7,borderRadius:"50%",background:online?C.green:C.amber,flexShrink:0}} />
-            <span style={{color:"#0F172A"}}>{online?"En línea — todo se publica en vivo":"Sin señal — se publica solo al reconectar"}{pending>0?` · ${pending} por publicar`:""}</span>
+            <div style={{width:7,height:7,borderRadius:"50%",background:detectando?C.amber:online?C.green:"#DC2626",flexShrink:0}} />
+            <span style={{color:"#0F172A"}}>
+              {detectando ? "Detectando señal…" : online ? "Con señal — publicando en vivo" : "Sin señal — la app publica sola al detectarla"}
+              {pending>0?` · ${pending} por publicar`:""}
+            </span>
           </div>
         </div>
       </div>
 
-      <OfflineBanner pending={pending} syncing={syncing} online={online} />
+      <OfflineBanner pending={pending} syncing={syncing} online={online} detectando={detectando} />
 
       {/* TABS */}
       <div style={{display:"flex",background:"white",borderBottom:`1px solid ${C.border}`,position:"sticky",top:52,zIndex:90}}>

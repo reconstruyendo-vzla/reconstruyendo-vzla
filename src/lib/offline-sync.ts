@@ -1,3 +1,4 @@
+import { hayInternetReal } from '@/lib/network'
 import { supabase } from '@/lib/supabase'
 import {
   IDB,
@@ -39,7 +40,7 @@ export function notificacionZonaCritica(item: BaseRecord): QueueNotify {
 }
 
 export async function enviarNotificacion(payload: QueueNotify): Promise<boolean> {
-  if (!navigator.onLine) return false
+  if (!(await hayInternetReal())) return false
   try {
     const res = await withTimeout(
       fetch('/api/notify', {
@@ -61,7 +62,7 @@ export async function enviarNotificacion(payload: QueueNotify): Promise<boolean>
 }
 
 export async function syncFromSupabase(): Promise<number> {
-  if (!navigator.onLine) return 0
+  if (!(await hayInternetReal())) return 0
   let count = 0
   for (const table of SYNC_TABLES) {
     const result = await withTimeout(
@@ -130,7 +131,7 @@ async function publicarItem(item: QueueItem): Promise<void> {
 }
 
 export async function processQueue(): Promise<{ synced: number; failed: number; notified: number }> {
-  if (!navigator.onLine) return { synced: 0, failed: getQ().length, notified: 0 }
+  if (!(await hayInternetReal())) return { synced: 0, failed: getQ().length, notified: 0 }
 
   const queue = getQ()
   if (!queue.length) return { synced: 0, failed: 0, notified: 0 }
@@ -167,7 +168,7 @@ export async function sincronizarTodo(): Promise<{
   failed: number
   notified: number
 }> {
-  if (!navigator.onLine) {
+  if (!(await hayInternetReal())) {
     return { downloaded: 0, synced: 0, failed: getQ().length, notified: 0 }
   }
   const { synced, failed, notified } = await processQueue()
